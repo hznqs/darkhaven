@@ -1,0 +1,5 @@
+-- Etapa 4: campos de catalogo usados por vendas e snapshots.
+ALTER TABLE "Product"
+ADD COLUMN IF NOT EXISTS "cost" DECIMAL(65,30) NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS "colors" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+ADD COLUMN IF NOT EXISTS "sizes" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];

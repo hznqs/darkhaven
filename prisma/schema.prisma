@@ -1,0 +1,314 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  ADMIN
+  STAFF
+}
+
+enum LeadStatus {
+  NEW
+  IN_PROGRESS
+  INTERESTED
+  WAITING_REPLY
+  CLOSED_WON
+  CLOSED_LOST
+}
+
+enum SaleStatus {
+  DRAFT
+  WAITING_PAYMENT
+  CONFIRMED
+  CANCELED
+}
+
+enum PaymentStatus {
+  PENDING
+  CONFIRMED
+  REFUNDED
+  CANCELED
+}
+
+enum PaymentMethod {
+  PIX
+  CREDIT_CARD
+  DEBIT_CARD
+  BOLETO
+  CASH
+}
+
+enum OrderStatus {
+  NEW
+  WAITING_PAYMENT
+  PAID
+  IN_PRODUCTION
+  SEPARATION
+  SENT
+  DELIVERED
+  CANCELED
+}
+
+enum PostSaleType {
+  FEEDBACK
+  COMPLAINT
+  EXCHANGE
+  RETURN
+  REPURCHASE
+  REACTIVATION
+  FOLLOW_UP
+}
+
+enum PostSaleStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_CUSTOMER
+  RESOLVED
+  CANCELED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  STATUS_CHANGE
+  PAYMENT_CONFIRMATION
+  REFUND_REQUEST
+}
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         Role       @default(STAFF)
+  isOwnerAdmin Boolean    @default(false)
+  active       Boolean    @default(true)
+  lastLoginAt  DateTime?
+  createdById  String?
+  createdBy    User?      @relation("UserCreatedBy", fields: [createdById], references: [id])
+  createdUsers User[]     @relation("UserCreatedBy")
+  postSales    PostSale[]
+  auditLogs    AuditLog[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+model Customer {
+  id              String                    @id @default(cuid())
+  name            String
+  whatsapp        String                    @unique
+  instagram       String?
+  email           String?
+  address         String?
+  city            String?
+  state           String?
+  notes           String?
+  status          String                    @default("active")
+  tags            String[]                  @default([])
+  totalSpent      Decimal                   @default(0)
+  sales           Sale[]
+  orders          Order[]
+  postSales       PostSale[]
+  purchaseHistory CustomerPurchaseHistory[]
+  convertedLeads  Lead[]
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+}
+
+model Lead {
+  id                  String     @id @default(cuid())
+  name                String
+  whatsapp            String
+  origin              String
+  status              LeadStatus @default(NEW)
+  notes               String?
+  convertedCustomerId String?
+  convertedCustomer   Customer?  @relation(fields: [convertedCustomerId], references: [id], onDelete: SetNull)
+  convertedAt         DateTime?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+}
+
+model Product {
+  id          String      @id @default(cuid())
+  name        String
+  category    String
+  sku         String?     @unique
+  price       Decimal
+  cost        Decimal     @default(0)
+  imageUrl    String?
+  colors      String[]    @default([])
+  sizes       String[]    @default([])
+  active      Boolean     @default(true)
+  description String?
+  saleItems   SaleItem[]
+  orderItems  OrderItem[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model Sale {
+  id              String                   @id @default(cuid())
+  saleNumber      Int                      @unique @default(autoincrement())
+  customerId      String
+  customer        Customer                 @relation(fields: [customerId], references: [id])
+  channel         String
+  status          SaleStatus               @default(WAITING_PAYMENT)
+  subtotal        Decimal
+  discount        Decimal                  @default(0)
+  total           Decimal
+  estimatedCost   Decimal                  @default(0)
+  estimatedProfit Decimal                  @default(0)
+  estimatedMargin Decimal                  @default(0)
+  items           SaleItem[]
+  payments        Payment[]
+  orders          Order[]
+  postSales       PostSale[]
+  purchaseHistory CustomerPurchaseHistory?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+}
+
+model CustomerPurchaseHistory {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  saleId      String   @unique
+  sale        Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  purchasedAt DateTime
+  expiresAt   DateTime
+  summary     String
+  total       Decimal
+  createdAt   DateTime @default(now())
+
+  @@index([customerId, expiresAt])
+  @@index([expiresAt])
+}
+
+model SaleItem {
+  id                      String   @id @default(cuid())
+  saleId                  String
+  sale                    Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId               String
+  product                 Product  @relation(fields: [productId], references: [id])
+  productNameSnapshot     String
+  productSkuSnapshot      String?
+  productCategorySnapshot String?
+  unitPriceSnapshot       Decimal  @default(0)
+  unitCostSnapshot        Decimal  @default(0)
+  selectedColor           String?
+  selectedSize            String?
+  estimatedUnitCost       Decimal?
+  discount                Decimal  @default(0)
+  customizationNotes      String?
+  quantity                Int
+  unitPrice               Decimal
+  subtotal                Decimal
+}
+
+model Payment {
+  id        String        @id @default(cuid())
+  saleId    String
+  sale      Sale          @relation(fields: [saleId], references: [id])
+  method    PaymentMethod
+  amount    Decimal
+  status    PaymentStatus @default(PENDING)
+  reason    String?
+  paidAt    DateTime?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+}
+
+model Order {
+  id          String      @id @default(cuid())
+  orderNumber Int         @unique @default(autoincrement())
+  saleId      String
+  sale        Sale        @relation(fields: [saleId], references: [id])
+  customerId  String
+  customer    Customer    @relation(fields: [customerId], references: [id])
+  status      OrderStatus @default(NEW)
+  total       Decimal
+  items       OrderItem[]
+  postSales   PostSale[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Int
+  unitPrice Decimal
+}
+
+model PostSale {
+  id                String            @id @default(cuid())
+  customerId        String
+  customer          Customer          @relation(fields: [customerId], references: [id])
+  orderId           String?
+  order             Order?            @relation(fields: [orderId], references: [id])
+  saleId            String?
+  sale              Sale?             @relation(fields: [saleId], references: [id])
+  type              PostSaleType
+  status            PostSaleStatus    @default(OPEN)
+  priority          Priority          @default(MEDIUM)
+  notes             String?
+  customerFeedback  String?
+  resolution        String?
+  responsibleUserId String?
+  responsibleUser   User?             @relation(fields: [responsibleUserId], references: [id])
+  nextActionAt      DateTime?
+  resolvedAt        DateTime?
+  testimonialLead   Boolean           @default(false)
+  refundRequested   Boolean           @default(false)
+  refundReason      String?
+  history           PostSaleHistory[]
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+}
+
+model PostSaleHistory {
+  id         String   @id @default(cuid())
+  postSaleId String
+  postSale   PostSale @relation(fields: [postSaleId], references: [id], onDelete: Cascade)
+  message    String
+  createdAt  DateTime @default(now())
+}
+
+model AuditLog {
+  id        String      @id @default(cuid())
+  userId    String?
+  user      User?       @relation(fields: [userId], references: [id])
+  action    AuditAction
+  entity    String
+  entityId  String?
+  metadata  Json?
+  createdAt DateTime    @default(now())
+}
+
+model StoreSettings {
+  id        String   @id @default(cuid())
+  storeName String   @default("DarkHaven")
+  whatsapp  String?
+  email     String?
+  theme     String   @default("dark")
+  glassMode Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+}

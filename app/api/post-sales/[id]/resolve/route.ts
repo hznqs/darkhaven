@@ -1,0 +1,56 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { prisma } from "@/lib/server/prisma";
+import { writeAuditLogSafe } from "@/lib/server/audit";
+import { serializePostSale } from "@/lib/server/serializers";
+import { requireAdmin } from "@/lib/server/security";
+import { parseJsonBody } from "@/lib/server/errors";
+
+type RouteContext = {
+  params: Promise<{ id: string }>;
+};
+
+export async function PATCH(request: NextRequest, context: RouteContext) {
+  const admin = requireAdmin(request);
+  if (!admin.ok) return NextResponse.json({ error: admin.message }, { status: admin.status });
+
+  const { id } = await context.params;
+  const body = await parseJsonBody<{ resolution?: string }>(request);
+  if (!body.ok) return body.response;
+
+  const resolution = body.data.resolution?.trim() || "Atendimento resolvido.";
+  if (resolution.length < 5 || resolution.length > 800) {
+    return NextResponse.json({ error: "A resolução precisa ter entre 5 e 800 caracteres." }, { status: 422 });
+  }
+
+  const record = await prisma.postSale.update({
+    where: { id },
+    data: {
+      status: "RESOLVED",
+      resolution,
+      resolvedAt: new Date(),
+      history: {
+        create: {
+          message: "Atendimento marcado como resolvido."
+        }
+      }
+    },
+    include: {
+      customer: true,
+      order: true,
+      sale: true,
+      responsibleUser: {
+        select: { name: true }
+      }
+    }
+  });
+
+  await writeAuditLogSafe({
+    userId: admin.userId,
+    action: "STATUS_CHANGE",
+    entity: "PostSale",
+    entityId: id,
+    metadata: { status: "RESOLVED" }
+  });
+
+  return NextResponse.json({ data: serializePostSale(record) });
+}

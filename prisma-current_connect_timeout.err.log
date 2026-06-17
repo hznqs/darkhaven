@@ -1,0 +1,25 @@
+No linha:1 caractere:87
++ ... m.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(cG9zdGdy ...
++                                                                  ~
+')' ausente na chamada do método.
+No linha:1 caractere:87
++ ... ase64String(cG9zdGdyZXNxbDovL3Bvc3RncmVzLnlycGx1dGd5ZWx0c2ZuYWZlY3FwO ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Token 'cG9zdGdyZXNxbDovL3Bvc3RncmVzLnlycGx1dGd5ZWx0c2ZuYWZlY3FwOkRhcmtoYXZlbjAxMDJAYXdzLTEtc2EtZWFzdC0xLnBvb2xlci5zdXBh
+YmFzZS5jb206NjU0My9wb3N0Z3Jlcz9wZ2JvdW5jZXI9dHJ1ZSZzc2xtb2RlPXJlcXVpcmUmY29ubmVjdF90aW1lb3V0PTEw' inesperado na 
+expressão ou instrução.
+No linha:1 caractere:295
++ ... dW5jZXI9dHJ1ZSZzc2xtb2RlPXJlcXVpcmUmY29ubmVjdF90aW1lb3V0PTEw)); SELEC ...
++                                                                 ~
+Token ')' inesperado na expressão ou instrução.
+No linha:1 caractere:296
++ ... W5jZXI9dHJ1ZSZzc2xtb2RlPXJlcXVpcmUmY29ubmVjdF90aW1lb3V0PTEw)); SELECT ...
++                                                                 ~
+Token ')' inesperado na expressão ou instrução.
+No linha:1 caractere:309
++ ... Zzc2xtb2RlPXJlcXVpcmUmY29ubmVjdF90aW1lb3V0PTEw)); SELECT 1; | npx pri ...
++                                                                 ~
+Um elemento pipe vazio não é permitido.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : MissingEndParenthesisInMethodCall
+ 

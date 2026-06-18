@@ -4,11 +4,13 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { DndContext, type DragEndEvent, useDraggable, useDroppable } from "@dnd-kit/core";
+import { DndContext, PointerSensor, closestCenter, pointerWithin, type CollisionDetection, type DragEndEvent, useDraggable, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
 import {
   Area,
   AreaChart,
+  CartesianGrid,
   Cell,
+  Legend,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -292,6 +294,11 @@ const responseCache = new Map<string, { data: unknown; updatedAt: number }>();
 const responseCacheMaxAge = 5 * 60 * 1000;
 let workspaceWarmupStarted = false;
 
+const kanbanCollisionDetection: CollisionDetection = (args) => {
+  const pointerCollisions = pointerWithin(args);
+  return pointerCollisions.length ? pointerCollisions : closestCenter(args);
+};
+
 export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -326,6 +333,7 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [saleDraftItems, setSaleDraftItems] = useState<SaleDraftItem[]>(() => [createSaleDraftItem()]);
   const [saleDiscount, setSaleDiscount] = useState("R$ 0,00");
+  const [saleCustomerId, setSaleCustomerId] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState<ToastState>(null);
@@ -556,7 +564,10 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
       clearProductImageObjectUrl();
       openModal("product");
     }
-    else if (module === "sales") openModal("sale");
+    else if (module === "sales") {
+      setSaleCustomerId("");
+      openModal("sale");
+    }
     else if (module === "payments") openModal("payment");
     else if (module === "post-sales") openModal("post-sale");
     else if (module === "orders") showToast("info", "Pedidos são criados automaticamente ao confirmar um pagamento.");
@@ -761,7 +772,13 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
 
       setLeads((current) => current.map((item) => (item.id === leadId ? payload.data as Lead : item)));
       await refreshData("all", { ignoreCache: true });
-      showToast("success", status === "CLOSED_WON" ? "Lead convertido sem duplicar cliente." : "Lead movido.");
+      if (status === "CLOSED_WON" && payload.data.convertedCustomerId) {
+        setSaleCustomerId(payload.data.convertedCustomerId);
+        openModal("sale");
+        showToast("success", "Lead convertido. Complete a nova venda.");
+        return;
+      }
+      showToast("success", "Lead movido.");
     } catch {
       setLeads(previous);
       showToast("error", "Falha de conexão ao mover o lead.");
@@ -1000,10 +1017,16 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
       return;
     }
 
+    const sale = sales.find((item) => item.id === saleId);
+    if (!sale) {
+      setSubmitError("Venda selecionada não foi encontrada na lista carregada.");
+      return;
+    }
+
     await submitJson("/api/payments", {
       saleId,
       method: getString(form, "method") || "PIX",
-      amount: getMoney(form, "amount")
+      amount: sale.total
     }, "Pagamento criado com sucesso.");
   }
 
@@ -1217,6 +1240,7 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
           sales={sales}
           saleDraftItems={saleDraftItems}
           saleDiscount={saleDiscount}
+          saleCustomerId={saleCustomerId}
           selectedPayment={selectedPayment}
           selectedOrder={selectedOrder}
           selectedSaleForPostSale={selectedSaleForPostSale}
@@ -1325,6 +1349,7 @@ function ActionModal({
   sales,
   saleDraftItems,
   saleDiscount,
+  saleCustomerId,
   selectedPayment,
   selectedOrder,
   selectedSaleForPostSale,
@@ -1363,6 +1388,7 @@ function ActionModal({
   sales: SaleSummary[];
   saleDraftItems: SaleDraftItem[];
   saleDiscount: string;
+  saleCustomerId: string;
   selectedPayment: Payment | null;
   selectedOrder: Order | null;
   selectedSaleForPostSale: SaleSummary | null;
@@ -1579,7 +1605,7 @@ function ActionModal({
       <ModalFrame title="Nova venda" onClose={onClose}>
         <form className="space-y-4" onSubmit={onSaleSubmit}>
           {!canSubmit ? <DependencyNotice text="Cadastre ao menos um cliente e um produto antes de criar vendas reais." /> : null}
-          <FormSelect label="Cliente" name="customerId" options={customers.map((customer) => [customer.id, customer.name])} required />
+          <FormSelect label="Cliente" name="customerId" options={customers.map((customer) => [customer.id, customer.name])} required defaultValue={saleCustomerId} />
           <SaleCartFields
             products={products}
             items={saleDraftItems}
@@ -1602,9 +1628,8 @@ function ActionModal({
       <ModalFrame title="Novo pagamento" onClose={onClose}>
         <form className="space-y-4" onSubmit={onPaymentSubmit}>
           {!canSubmit ? <DependencyNotice text="Crie uma venda antes de registrar pagamento real." /> : null}
-          <FormSelect label="Venda" name="saleId" options={sales.map((sale) => [sale.id, `${formatSaleCode(sale)} - ${sale.customer} - ${brl(sale.total)}`])} required />
+          <PaymentSalePicker sales={sales} />
           <FormSelect label="Método" name="method" options={[["PIX", "Pix"], ["CREDIT_CARD", "Cartão de crédito"], ["DEBIT_CARD", "Cartão de débito"], ["BOLETO", "Boleto"], ["CASH", "Dinheiro"]]} />
-          <FormInput label="Valor recebido" name="amount" required mask="currency" />
           <FormFooter submitting={submitting} submitError={submitError} onClose={onClose} label="Registrar pagamento" disabled={!canSubmit} />
         </form>
       </ModalFrame>
@@ -1996,6 +2021,38 @@ function FormSelect({ label, name, options, required = false, defaultValue }: Re
   );
 }
 
+function PaymentSalePicker({ sales }: Readonly<{ sales: SaleSummary[] }>) {
+  const [selectedSaleId, setSelectedSaleId] = useState(sales[0]?.id ?? "");
+  const effectiveSelectedSaleId = sales.some((sale) => sale.id === selectedSaleId) ? selectedSaleId : sales[0]?.id ?? "";
+  const selectedSale = sales.find((sale) => sale.id === effectiveSelectedSaleId);
+
+  return (
+    <div className="space-y-3">
+      <label className="block space-y-2 text-sm text-zinc-300">
+        <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">Venda</span>
+        <select
+          className="w-full rounded-crm border border-white/10 bg-black/70 px-3 py-3 text-white outline-none focus:border-ember/60"
+          name="saleId"
+          required
+          value={effectiveSelectedSaleId}
+          onChange={(event) => setSelectedSaleId(event.target.value)}
+        >
+          {sales.map((sale) => (
+            <option key={sale.id} value={sale.id}>
+              {formatSaleCode(sale)} - {sale.customer} - {brl(sale.total)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="rounded-crm border border-white/10 bg-white/[0.04] p-3">
+        <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">Valor do pagamento</p>
+        <strong className="mt-2 block text-xl font-semibold text-white">{selectedSale ? brl(selectedSale.total) : brl(0)}</strong>
+        <p className="mt-1 text-xs text-zinc-500">Valor definido pela venda selecionada.</p>
+      </div>
+    </div>
+  );
+}
+
 function SaleCartFields({
   products,
   items,
@@ -2181,6 +2238,11 @@ function DetailBox({ label, value }: Readonly<{ label: string; value: string }>)
 function Dashboard({ dashboard }: Readonly<{ dashboard: DashboardData }>) {
   const mounted = useMounted();
   const revenueSeries = dashboard.revenueByDay.length ? dashboard.revenueByDay : [{ day: "01", value: 0 }];
+  const revenueTotal = dashboard.revenueByDay.reduce((sum, item) => sum + item.value, 0);
+  const bestRevenueDay = dashboard.revenueByDay.reduce<(typeof dashboard.revenueByDay)[number] | null>((best, item) => {
+    if (!best || item.value > best.value) return item;
+    return best;
+  }, null);
   const channelSeries = dashboard.revenueByChannel;
 
   return (
@@ -2200,21 +2262,29 @@ function Dashboard({ dashboard }: Readonly<{ dashboard: DashboardData }>) {
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[1.35fr_0.75fr]">
-        <GlassPanel title="Faturamento por dia">
-          <div className="h-72">
+        <GlassPanel title="Faturamento do mês">
+          <div className="mb-4 grid gap-3 sm:grid-cols-3">
+            <SalesInsight label="Total mensal" value={brl(revenueTotal)} detail="pagamentos confirmados" />
+            <SalesInsight label="Melhor dia do mês" value={bestRevenueDay?.day ?? "Sem dados"} detail={bestRevenueDay ? brl(bestRevenueDay.value) : "sem faturamento"} />
+            <SalesInsight label="Ticket médio" value={brl(dashboard.kpis.averageTicket)} detail={`${dashboard.kpis.sales} vendas confirmadas`} />
+          </div>
+          <div className="relative h-72 overflow-hidden rounded-crm border border-white/10 bg-[radial-gradient(circle_at_70%_18%,rgba(216,177,93,0.18),transparent_34%),radial-gradient(circle_at_20%_80%,rgba(91,117,103,0.18),transparent_32%),linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.012))] p-3">
+            <div className="pointer-events-none absolute inset-x-10 bottom-7 h-16 rounded-full bg-ember/10 blur-3xl" aria-hidden />
             {mounted ? (
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={revenueSeries} margin={{ top: 12, right: 12, left: -18, bottom: 0 }}>
+                <AreaChart data={revenueSeries} margin={{ top: 18, right: 18, left: 4, bottom: 4 }}>
                   <defs>
-                    <linearGradient id="revenue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#f4f2ec" stopOpacity={0.35} />
-                      <stop offset="95%" stopColor="#f4f2ec" stopOpacity={0} />
+                    <linearGradient id="dashboardRevenueGlow" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#d8b15d" stopOpacity={0.46} />
+                      <stop offset="52%" stopColor="#5b7567" stopOpacity={0.18} />
+                      <stop offset="100%" stopColor="#5b7567" stopOpacity={0.01} />
                     </linearGradient>
                   </defs>
-                  <XAxis dataKey="day" stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
-                  <Tooltip contentStyle={{ background: "#080a0c", border: "1px solid rgba(255,255,255,.12)", borderRadius: 8 }} />
-                  <Area type="monotone" dataKey="value" stroke="#f4f2ec" strokeWidth={2} fill="url(#revenue)" />
+                  <CartesianGrid stroke="rgba(255,255,255,0.055)" strokeDasharray="4 8" vertical={false} />
+                  <XAxis dataKey="day" stroke="#71717a" fontSize={11} tickLine={false} axisLine={false} minTickGap={12} />
+                  <YAxis stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} width={72} tickFormatter={(value) => brl(Number(value)).replace("R$", "").trim()} />
+                  <Tooltip formatter={(value) => brl(Number(value))} labelFormatter={(label) => `Dia ${label}`} contentStyle={{ background: "#080a0c", border: "1px solid rgba(255,255,255,.12)", borderRadius: 8 }} />
+                  <Area name="Faturamento" type="monotone" dataKey="value" stroke="#d8b15d" strokeWidth={3} fill="url(#dashboardRevenueGlow)" dot={false} activeDot={{ r: 5, stroke: "#fff7df", strokeWidth: 2 }} />
                 </AreaChart>
               </ResponsiveContainer>
             ) : (
@@ -2283,6 +2353,12 @@ function Clients({
   onInactivate: (customer: Customer) => void;
   onCreateSale: () => void;
 }>) {
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+  const totalPages = Math.max(1, Math.ceil(customers.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedCustomers = customers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
   return (
     <GlassPanel
       title="Lista de clientes"
@@ -2293,7 +2369,10 @@ function Clients({
             className="w-full bg-transparent text-zinc-200 outline-none"
             placeholder="Buscar cliente..."
             value={search}
-            onChange={(event) => onSearchChange(event.target.value)}
+            onChange={(event) => {
+              onSearchChange(event.target.value);
+              setPage(1);
+            }}
           />
         </label>
       )}
@@ -2313,7 +2392,7 @@ function Clients({
             </tr>
           </thead>
           <tbody className="divide-y divide-white/8">
-            {customers.map((customer) => (
+            {paginatedCustomers.map((customer) => (
               <tr key={customer.id} className="text-zinc-300">
                 <td className="py-4 font-semibold text-white">
                   <button className="text-left hover:text-ember" onClick={() => onOpenDetail(customer.id)}>{customer.name}</button>
@@ -2335,46 +2414,135 @@ function Clients({
           </tbody>
         </table> : null}
       </div>
+      <PaginationControls
+        className="mt-4"
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalItems={customers.length}
+        pageSize={pageSize}
+        itemLabel="clientes"
+        onPageChange={setPage}
+      />
     </GlassPanel>
   );
 }
 
 function Leads({ leads, onCreate, onMove, onEdit }: Readonly<{ leads: Lead[]; onCreate: () => void; onMove: (leadId: string, status: LeadStatus) => void; onEdit: (lead: Lead) => void }>) {
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  const [listSearch, setListSearch] = useState("");
+  const [listPage, setListPage] = useState(1);
+  const pageSize = 5;
+  const filteredListLeads = useMemo(() => {
+    const search = listSearch.trim().toLowerCase();
+    if (!search) return leads;
+    return leads.filter((lead) =>
+      [lead.name, lead.whatsapp, lead.origin, lead.status, lead.notes ?? ""].some((value) => value.toLowerCase().includes(search))
+    );
+  }, [leads, listSearch]);
+  const totalPages = Math.max(1, Math.ceil(filteredListLeads.length / pageSize));
+  const currentPage = Math.min(listPage, totalPages);
+  const paginatedListLeads = filteredListLeads.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
   function handleDragEnd(event: DragEndEvent) {
-    if (event.over?.id && event.active.id) {
-      onMove(String(event.active.id), event.over.id as LeadStatus);
-    }
+    if (!event.over?.id || !leadColumns.some((column) => column.key === event.over?.id)) return;
+    onMove(String(event.active.id), event.over.id as LeadStatus);
   }
 
   return (
-    <DndContext onDragEnd={handleDragEnd}>
-      <div className="grid auto-cols-[minmax(180px,82vw)] grid-flow-col gap-3 overflow-x-auto pb-2 soft-scroll 2xl:grid-flow-row 2xl:grid-cols-6">
-        {leadColumns.map((column) => {
-          const columnLeads = leads.filter((lead) => getLeadStatusKey(lead) === column.key);
-          return (
-            <LeadColumn key={column.key} status={column.key} label={column.label} leads={columnLeads} onCreate={onCreate} onEdit={onEdit} />
-          );
-        })}
-      </div>
-    </DndContext>
+    <div className="space-y-5">
+      <DndContext sensors={sensors} collisionDetection={kanbanCollisionDetection} onDragEnd={handleDragEnd}>
+        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+          {leadColumns.map((column) => {
+            const columnLeads = leads.filter((lead) => getLeadStatusKey(lead) === column.key);
+            return (
+              <LeadColumn key={column.key} status={column.key} label={column.label} leads={columnLeads} onCreate={onCreate} onEdit={onEdit} />
+            );
+          })}
+        </div>
+      </DndContext>
+
+      <GlassPanel
+        title="Lista detalhada de leads"
+        actions={(
+          <label className="flex min-w-60 items-center gap-2 rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-zinc-500">
+            <Search className="h-4 w-4" aria-hidden />
+            <input
+              className="w-full bg-transparent text-zinc-200 outline-none"
+              placeholder="Buscar lead..."
+              value={listSearch}
+              maxLength={80}
+              onChange={(event) => {
+                setListSearch(event.target.value);
+                setListPage(1);
+              }}
+            />
+          </label>
+        )}
+      >
+        {filteredListLeads.length === 0 ? <EmptyState message="Nenhum lead encontrado." /> : null}
+        {filteredListLeads.length > 0 ? (
+          <div className="overflow-x-auto soft-scroll">
+            <table className="w-full min-w-[900px] text-left text-sm">
+              <thead className="text-xs uppercase tracking-[0.18em] text-zinc-500">
+                <tr>
+                  <th className="py-3">Nome</th>
+                  <th>WhatsApp</th>
+                  <th>Status</th>
+                  <th>Origem</th>
+                  <th>Último contato</th>
+                  <th>Valor estimado</th>
+                  <th>Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/8">
+                {paginatedListLeads.map((lead) => (
+                  <tr key={lead.id} className="text-zinc-300">
+                    <td className="py-4 font-semibold text-white">{lead.name}</td>
+                    <td>{formatPhoneBR(lead.whatsapp)}</td>
+                    <td><Pill label={lead.status} warning={getLeadStatusKey(lead) === "CLOSED_LOST"} /></td>
+                    <td><Pill label={lead.origin || "Não informado"} /></td>
+                    <td>{lead.lastContact}</td>
+                    <td className="font-semibold text-ember">{brl(lead.value)}</td>
+                    <td className="flex gap-2 py-3">
+                      <IconButton label="Ver detalhes" icon={ClipboardList} onClick={() => onEdit(lead)} />
+                      <IconButton label="Editar lead" icon={Pencil} onClick={() => onEdit(lead)} />
+                      <IconButton label="Converter em cliente" icon={Users} onClick={() => onMove(lead.id, "CLOSED_WON")} disabled={Boolean(lead.convertedCustomerId) || getLeadStatusKey(lead) === "CLOSED_WON"} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <PaginationControls
+              className="mt-4"
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={filteredListLeads.length}
+              pageSize={pageSize}
+              itemLabel="leads"
+              onPageChange={setListPage}
+            />
+          </div>
+        ) : null}
+      </GlassPanel>
+    </div>
   );
 }
 
 function LeadColumn({ status, label, leads, onCreate, onEdit }: Readonly<{ status: LeadStatus; label: string; leads: Lead[]; onCreate: () => void; onEdit: (lead: Lead) => void }>) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
   return (
-    <section ref={setNodeRef} className={`min-h-96 rounded-crm border p-3 transition ${isOver ? "border-ember/70 bg-ember/10" : "border-white/10 bg-black/42"}`}>
+    <section ref={setNodeRef} className={`min-w-0 min-h-96 rounded-crm border p-3 transition ${isOver ? "border-ember/70 bg-ember/10" : "border-white/10 bg-black/42"}`}>
       <div className="mb-3 flex items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-white">{label}</h2>
         <Pill label={String(leads.length)} />
       </div>
-      <div className="space-y-3">
+      <div className={`${leads.length > 3 ? "max-h-[520px] overflow-y-auto pr-1 soft-scroll" : ""} space-y-3`}>
         {leads.length === 0 ? <EmptyState message="Nenhum lead nesta etapa." /> : null}
         {leads.map((lead) => (
           <LeadCard key={lead.id} lead={lead} onEdit={onEdit} />
         ))}
-        <button className="w-full rounded-crm border border-dashed border-white/14 px-3 py-2 text-xs text-zinc-400 hover:text-white" onClick={onCreate}>+ lead</button>
       </div>
+      <button className="mt-3 w-full rounded-crm border border-dashed border-white/14 px-3 py-2 text-xs text-zinc-400 hover:text-white" onClick={onCreate}>+ lead</button>
     </section>
   );
 }
@@ -2388,7 +2556,7 @@ function LeadCard({ lead, onEdit }: Readonly<{ lead: Lead; onEdit: (lead: Lead) 
       style={style}
       {...listeners}
       {...attributes}
-      className={`overflow-hidden rounded-crm border border-white/10 bg-black/36 p-3 ${isDragging ? "z-20 opacity-80" : ""}`}
+      className={`touch-none overflow-hidden rounded-crm border border-white/10 bg-black/36 p-3 ${isDragging ? "z-20 cursor-grabbing opacity-80" : "cursor-grab"}`}
     >
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
@@ -2504,10 +2672,11 @@ function Sales({
 }>) {
   const mounted = useMounted();
   const [page, setPage] = useState(1);
-  const pageSize = 10;
-  const revenueSeries = summary.revenueByDay.length ? summary.revenueByDay : [{ day: "01", value: 0 }];
-  const salesSeries = summary.salesByDay.length ? summary.salesByDay : [{ day: "01", value: 0 }];
-  const ticketSeries = summary.averageTicketByDay.length ? summary.averageTicketByDay : [{ day: "01", value: 0 }];
+  const pageSize = 3;
+  const performanceSeries = buildSalesPerformanceSeries(summary.revenueByDay, summary.salesByDay, summary.averageTicketByDay);
+  const bestDay = getBestPerformanceDay(performanceSeries);
+  const topChannel = getTopChartItem(summary.salesByChannel);
+  const topStatus = getTopChartItem(summary.salesByStatus);
   const channelSeries = summary.salesByChannel;
   const totalPages = Math.max(1, Math.ceil(sales.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -2576,22 +2745,65 @@ function Sales({
         </div>
       </GlassPanel>
 
-      <section className="grid gap-5 xl:grid-cols-[1.1fr_1.1fr_0.8fr]">
-        <GlassPanel title="Receita por dia">
-          <div className="h-64">
-            {mounted ? <ResponsiveContainer width="100%" height="100%"><AreaChart data={revenueSeries} margin={{ top: 12, right: 12, left: -18, bottom: 0 }}><XAxis dataKey="day" stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} /><YAxis stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} /><Tooltip contentStyle={{ background: "#080a0c", border: "1px solid rgba(255,255,255,.12)", borderRadius: 8 }} /><Area type="monotone" dataKey="value" stroke="#f4f2ec" strokeWidth={2} fill="#f4f2ec22" /></AreaChart></ResponsiveContainer> : <ChartSkeleton />}
+      <section className="grid gap-5 xl:grid-cols-[1.55fr_0.75fr]">
+        <GlassPanel title="Desempenho do período">
+          <div className="mb-4 grid gap-3 md:grid-cols-3">
+            <SalesInsight label="Melhor dia" value={bestDay ? bestDay.day : "Sem vendas"} detail={bestDay ? `${brl(bestDay.revenue)} em receita` : "Sem leitura no período"} />
+            <SalesInsight label="Canal principal" value={topChannel?.name ?? "Sem canal"} detail={topChannel ? `${topChannel.value} vendas` : "Sem vendas por canal"} />
+            <SalesInsight label="Status dominante" value={topStatus?.name ?? "Sem status"} detail={topStatus ? `${topStatus.value} vendas` : "Sem status no período"} />
+          </div>
+          <div className="relative h-[340px] min-w-0 overflow-hidden rounded-crm border border-white/10 bg-[radial-gradient(circle_at_75%_20%,rgba(91,117,103,0.22),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.012))] p-3">
+            <div className="pointer-events-none absolute inset-x-8 bottom-8 h-20 rounded-full bg-moss/10 blur-3xl" aria-hidden />
+            {!mounted ? <ChartSkeleton /> : null}
+            {mounted && performanceSeries.length === 0 ? <EmptyState message="Sem vendas no período selecionado." /> : null}
+            {mounted && performanceSeries.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={performanceSeries} margin={{ top: 18, right: 12, left: 8, bottom: 8 }}>
+                  <defs>
+                    <linearGradient id="salesRevenueGlow" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#93c5a3" stopOpacity={0.46} />
+                      <stop offset="58%" stopColor="#5b7567" stopOpacity={0.14} />
+                      <stop offset="100%" stopColor="#5b7567" stopOpacity={0.01} />
+                    </linearGradient>
+                    <linearGradient id="salesTicketGlow" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#d8b15d" stopOpacity={0.28} />
+                      <stop offset="100%" stopColor="#d8b15d" stopOpacity={0.01} />
+                    </linearGradient>
+                    <linearGradient id="salesCountGlow" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#f4f2ec" stopOpacity={0.2} />
+                      <stop offset="100%" stopColor="#f4f2ec" stopOpacity={0.01} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="rgba(255,255,255,0.055)" strokeDasharray="4 8" vertical={false} />
+                  <XAxis dataKey="day" stroke="#71717a" fontSize={11} tickLine={false} axisLine={false} minTickGap={10} />
+                  <YAxis yAxisId="money" stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} width={72} tickFormatter={(value) => brl(Number(value)).replace("R$", "").trim()} />
+                  <YAxis yAxisId="count" orientation="right" stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} width={36} allowDecimals={false} />
+                  <Tooltip
+                    formatter={(value, name) => {
+                      if (name === "Vendas") return [`${Number(value)} vendas`, name];
+                      return [brl(Number(value)), name];
+                    }}
+                    labelFormatter={(label) => `Dia ${label}`}
+                    contentStyle={{ background: "#080a0c", border: "1px solid rgba(255,255,255,.12)", borderRadius: 8 }}
+                  />
+                  <Legend verticalAlign="top" align="right" wrapperStyle={{ color: "#d4d4d8", fontSize: 12, paddingBottom: 8 }} />
+                  <Area yAxisId="money" name="Receita" type="monotone" dataKey="revenue" stroke="#93c5a3" strokeWidth={3} fill="url(#salesRevenueGlow)" dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: "#e8efe9" }} />
+                  <Area yAxisId="money" name="Ticket médio" type="monotone" dataKey="ticket" stroke="#d8b15d" strokeWidth={2.5} fill="url(#salesTicketGlow)" dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: "#fff7df" }} />
+                  <Area yAxisId="count" name="Vendas" type="monotone" dataKey="sales" stroke="#f4f2ec" strokeWidth={2} fill="url(#salesCountGlow)" dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: "#ffffff" }} />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : null}
           </div>
         </GlassPanel>
-        <GlassPanel title="Vendas e ticket">
-          <div className="h-64">
-            {mounted ? <ResponsiveContainer width="100%" height="100%"><AreaChart data={salesSeries.map((item, index) => ({ ...item, ticket: ticketSeries[index]?.value ?? 0 }))} margin={{ top: 12, right: 12, left: -18, bottom: 0 }}><XAxis dataKey="day" stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} /><YAxis stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} /><Tooltip contentStyle={{ background: "#080a0c", border: "1px solid rgba(255,255,255,.12)", borderRadius: 8 }} /><Area type="monotone" dataKey="value" stroke="#d8b15d" strokeWidth={2} fill="#d8b15d22" /><Area type="monotone" dataKey="ticket" stroke="#5b7567" strokeWidth={2} fill="#5b756722" /></AreaChart></ResponsiveContainer> : <ChartSkeleton />}
-          </div>
-        </GlassPanel>
-        <GlassPanel title="Vendas por canal">
-          <div className="h-64">
-            {mounted && channelSeries.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={channelSeries} innerRadius={52} outerRadius={82} dataKey="value" paddingAngle={3}>{channelSeries.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}</Pie><Tooltip contentStyle={{ background: "#080a0c", border: "1px solid rgba(255,255,255,.12)", borderRadius: 8 }} /></PieChart></ResponsiveContainer> : <EmptyState message="Sem vendas por canal no período." />}
-          </div>
-        </GlassPanel>
+
+        <div className="space-y-5">
+          <GlassPanel title="Canais">
+            <RankingBars items={channelSeries} emptyMessage="Sem vendas por canal no período." />
+          </GlassPanel>
+          <GlassPanel title="Status">
+            <RankingBars items={summary.salesByStatus} emptyMessage="Sem vendas por status no período." />
+          </GlassPanel>
+        </div>
       </section>
 
       <GlassPanel title="Lista de vendas" actions={<Filters labels={["Data", "Valor", "Status"]} />}>
@@ -2699,16 +2911,55 @@ function SalesMetric({ label, value, detail }: Readonly<{ label: string; value: 
   );
 }
 
+function SalesInsight({ label, value, detail }: Readonly<{ label: string; value: string; detail: string }>) {
+  return (
+    <div className="min-w-0 rounded-crm border border-white/10 bg-white/[0.035] px-3 py-3">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">{label}</p>
+      <strong className="mt-2 block truncate text-lg font-semibold text-white">{value}</strong>
+      <p className="mt-1 truncate text-xs text-moss">{detail}</p>
+    </div>
+  );
+}
+
+function RankingBars({ items, emptyMessage }: Readonly<{ items: { name: string; value: number; fill?: string }[]; emptyMessage: string }>) {
+  const maxValue = Math.max(...items.map((item) => item.value), 0);
+
+  if (items.length === 0 || maxValue === 0) return <EmptyState message={emptyMessage} />;
+
+  return (
+    <div className="space-y-3">
+      {items.map((item) => (
+        <div key={item.name} className="space-y-2">
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="min-w-0 truncate font-medium text-zinc-200">{item.name}</span>
+            <strong className="shrink-0 text-xs text-ember">{item.value}</strong>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-white/[0.06]">
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: `${Math.max(6, (item.value / maxValue) * 100)}%`,
+                background: item.fill ?? "#d8b15d"
+              }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Orders({ orders, onMove, onSelect }: Readonly<{ orders: Order[]; onMove: (orderId: string, status: OrderStatus) => void; onSelect: (order: Order) => void }>) {
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+
   function handleDragEnd(event: DragEndEvent) {
-    if (event.over?.id && event.active.id) {
-      onMove(String(event.active.id), event.over.id as OrderStatus);
-    }
+    if (!event.over?.id || !orderColumns.some((column) => column.key === event.over?.id)) return;
+    onMove(String(event.active.id), event.over.id as OrderStatus);
   }
 
   return (
-    <DndContext onDragEnd={handleDragEnd}>
-      <div className="grid auto-cols-[minmax(240px,82vw)] grid-flow-col gap-3 overflow-x-auto pb-3 soft-scroll xl:grid-flow-row xl:grid-cols-7">
+    <DndContext sensors={sensors} collisionDetection={kanbanCollisionDetection} onDragEnd={handleDragEnd}>
+      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
         {orderColumns.map((column) => (
           <OrderColumn key={column.key} status={column.key} label={column.label} orders={orders.filter((order) => order.status === column.key)} onSelect={onSelect} />
         ))}
@@ -2720,12 +2971,12 @@ function Orders({ orders, onMove, onSelect }: Readonly<{ orders: Order[]; onMove
 function OrderColumn({ status, label, orders, onSelect }: Readonly<{ status: OrderStatus; label: string; orders: Order[]; onSelect: (order: Order) => void }>) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
   return (
-    <section ref={setNodeRef} className={`min-h-96 rounded-crm border p-3 transition ${isOver ? "border-ember/70 bg-ember/10" : "border-white/10 bg-black/42"}`}>
+    <section ref={setNodeRef} className={`min-w-0 min-h-96 rounded-crm border p-3 transition ${isOver ? "border-ember/70 bg-ember/10" : "border-white/10 bg-black/42"}`}>
       <div className="mb-3 flex items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-white">{label}</h2>
         <Pill label={String(orders.length)} />
       </div>
-      <div className="space-y-3">
+      <div className={`${orders.length > 3 ? "max-h-[560px] overflow-y-auto pr-1 soft-scroll" : ""} space-y-3`}>
         {orders.length === 0 ? <EmptyState message="Nenhum pedido nesta etapa." /> : null}
         {orders.map((order) => (
           <OrderCard key={order.id} order={order} onSelect={onSelect} />
@@ -2746,14 +2997,14 @@ function OrderCard({ order, onSelect }: Readonly<{ order: Order; onSelect: (orde
       {...listeners}
       {...attributes}
       onClick={() => onSelect(order)}
-      className={`rounded-crm border border-white/10 bg-white/[0.055] p-3 shadow-glow ${isDragging ? "z-20 opacity-80" : ""}`}
+      className={`touch-none rounded-crm border border-white/10 bg-white/[0.055] p-3 shadow-glow ${isDragging ? "z-20 cursor-grabbing opacity-80" : "cursor-grab"}`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <h3 className="font-semibold text-white">{formatOrderCode(order)}</h3>
-        <span className="text-xs text-ember">{brl(order.total)}</span>
+      <div className="flex min-w-0 items-start justify-between gap-2">
+        <h3 className="min-w-0 truncate font-semibold text-white">{formatOrderCode(order)}</h3>
+        <span className="max-w-[52%] shrink-0 truncate text-right text-xs font-semibold text-ember" title={brl(order.total)}>{brl(order.total)}</span>
       </div>
-      <p className="mt-2 text-sm text-zinc-300">{order.customer}</p>
-      <p className="mt-1 text-xs text-zinc-500">{order.saleNumber ? `Venda #${order.saleNumber} · ` : ""}{order.channel} · {shortDate(order.date)}</p>
+      <p className="mt-2 truncate text-sm text-zinc-300" title={order.customer}>{order.customer}</p>
+      <p className="mt-1 min-w-0 truncate text-xs text-zinc-500" title={`${order.saleNumber ? `Venda #${order.saleNumber} · ` : ""}${order.channel} · ${shortDate(order.date)}`}>{order.saleNumber ? `Venda #${order.saleNumber} · ` : ""}{order.channel} · {shortDate(order.date)}</p>
       <div className="mt-3 flex flex-wrap gap-1">
         {order.items.slice(0, 2).map((item) => (
           <span key={item} className="rounded-crm bg-black/40 px-2 py-1 text-[11px] text-zinc-400">{item}</span>
@@ -2881,13 +3132,13 @@ function Finance({ finance }: Readonly<{ finance: FinanceData }>) {
   return (
     <div className="space-y-5">
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
-        <Metric label="Faturamento" value={brl(finance.summary.revenue)} hint="pagamentos confirmados" />
-        <Metric label="Custo estimado" value={brl(finance.summary.estimatedCost)} hint="itens vendidos" warning />
-        <Metric label="Lucro estimado" value={brl(finance.summary.estimatedProfit)} hint="total menos custo" />
-        <Metric label="Margem estimada" value={`${finance.summary.estimatedMargin.toFixed(2)}%`} hint="sobre vendas confirmadas" />
-        <Metric label="Pendências" value={brl(finance.summary.pendingPayments)} hint="pagamentos pendentes" warning />
-        <Metric label="Ticket médio" value={brl(finance.summary.averageTicket)} hint="vendas confirmadas" />
-        <Metric label="Reembolsos" value={brl(finance.summary.refunds)} hint="manual" warning />
+        <FinanceMetric label="Faturamento" value={brl(finance.summary.revenue)} hint="pagamentos confirmados" />
+        <FinanceMetric label="Custo estimado" value={brl(finance.summary.estimatedCost)} hint="itens vendidos" warning />
+        <FinanceMetric label="Lucro estimado" value={brl(finance.summary.estimatedProfit)} hint="total menos custo" />
+        <FinanceMetric label="Margem estimada" value={`${finance.summary.estimatedMargin.toFixed(2)}%`} hint="sobre vendas confirmadas" />
+        <FinanceMetric label="Pendências" value={brl(finance.summary.pendingPayments)} hint="pagamentos pendentes" warning />
+        <FinanceMetric label="Ticket médio" value={brl(finance.summary.averageTicket)} hint="vendas confirmadas" />
+        <FinanceMetric label="Reembolsos" value={brl(finance.summary.refunds)} hint="manual" warning />
       </section>
       <section className="grid gap-5 xl:grid-cols-[1.25fr_0.75fr]">
         <GlassPanel title="Receita por dia">
@@ -3122,6 +3373,68 @@ function Metric({ label, value, hint, warning = false }: Readonly<{ label: strin
   );
 }
 
+function FinanceMetric({ label, value, hint, warning = false }: Readonly<{ label: string; value: string; hint: string; warning?: boolean }>) {
+  return (
+    <article className="glass-panel min-w-0 rounded-crm p-4">
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{label}</p>
+      <strong className="mt-3 block min-h-8 truncate text-2xl font-semibold leading-none text-white">{value}</strong>
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <p className={`truncate text-xs ${warning ? "text-ember" : "text-moss"}`}>{hint}</p>
+        <Gauge className={`h-4 w-4 shrink-0 ${warning ? "text-ember" : "text-moss"}`} aria-hidden />
+      </div>
+    </article>
+  );
+}
+
+function PaginationControls({
+  currentPage,
+  totalPages,
+  totalItems,
+  pageSize,
+  itemLabel,
+  onPageChange,
+  className = ""
+}: Readonly<{
+  currentPage: number;
+  totalPages: number;
+  totalItems: number;
+  pageSize: number;
+  itemLabel: string;
+  onPageChange: (page: number) => void;
+  className?: string;
+}>) {
+  if (totalItems <= pageSize) return null;
+
+  return (
+    <div className={`flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-3 text-xs text-zinc-400 ${className}`}>
+      <span>
+        Mostrando {(currentPage - 1) * pageSize + 1}-{Math.min(currentPage * pageSize, totalItems)} de {totalItems} {itemLabel}
+      </span>
+      <div className="flex items-center gap-2">
+        <button
+          className="rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2 font-semibold text-zinc-300 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={currentPage === 1}
+          onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+          type="button"
+        >
+          Anterior
+        </button>
+        <span className="rounded-crm border border-white/10 bg-black/30 px-3 py-2 text-zinc-300">
+          {currentPage} / {totalPages}
+        </span>
+        <button
+          className="rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2 font-semibold text-zinc-300 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={currentPage === totalPages}
+          onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+          type="button"
+        >
+          Próxima
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Pill({ label, warning = false, className = "" }: Readonly<{ label: string; warning?: boolean; className?: string }>) {
   return (
     <span title={label} className={`inline-flex min-w-0 max-w-full items-center truncate rounded-crm border px-2 py-1 text-[11px] font-semibold ${warning ? "border-ember/35 bg-ember/12 text-ember" : "border-moss/35 bg-moss/14 text-zinc-200"} ${className}`}>
@@ -3195,6 +3508,51 @@ function useMounted() {
 
 function ChartSkeleton() {
   return <div className="h-full w-full rounded-crm border border-white/10 bg-white/[0.035]" />;
+}
+
+function buildSalesPerformanceSeries(
+  revenueByDay: SalesSummaryData["revenueByDay"],
+  salesByDay: SalesSummaryData["salesByDay"],
+  averageTicketByDay: SalesSummaryData["averageTicketByDay"]
+) {
+  const revenueByKey = new Map(revenueByDay.map((item) => [normalizeChartDayKey(item.day), item.value]));
+  const salesByKey = new Map(salesByDay.map((item) => [normalizeChartDayKey(item.day), item.value]));
+  const ticketByKey = new Map(averageTicketByDay.map((item) => [normalizeChartDayKey(item.day), item.value]));
+  const days = Array.from(new Set([...revenueByKey.keys(), ...salesByKey.keys(), ...ticketByKey.keys()]));
+
+  return days.map((day) => ({
+    day: formatChartDayLabel(day),
+    revenue: revenueByKey.get(day) ?? 0,
+    sales: salesByKey.get(day) ?? 0,
+    ticket: ticketByKey.get(day) ?? 0
+  }));
+}
+
+function getBestPerformanceDay(series: ReturnType<typeof buildSalesPerformanceSeries>) {
+  return series.reduce<(typeof series)[number] | null>((best, item) => {
+    if (!best || item.revenue > best.revenue) return item;
+    return best;
+  }, null);
+}
+
+function getTopChartItem(items: { name: string; value: number; fill?: string }[]) {
+  return items.reduce<(typeof items)[number] | null>((best, item) => {
+    if (!best || item.value > best.value) return item;
+    return best;
+  }, null);
+}
+
+function normalizeChartDayKey(day: string) {
+  const [first, second] = day.split("-");
+  if (first?.length === 2 && second?.length === 2) return `${first}-${second}`;
+  if (first?.length === 2 && second?.length === 4) return `${second.slice(0, 2)}-${first}`;
+  return day;
+}
+
+function formatChartDayLabel(day: string) {
+  const [month, date] = day.split("-");
+  if (!month || !date) return day;
+  return `${date}/${month}`;
 }
 
 async function fetchData<T>(url: string): Promise<{ ok: true; data: T } | { ok: false }> {
@@ -3362,6 +3720,7 @@ function rangeToDates(range: SalesFilters["range"]) {
     start.setDate(start.getDate() - 29);
   } else if (range === "month") {
     start.setDate(1);
+    end.setMonth(end.getMonth() + 1, 0);
   } else if (range === "lastMonth") {
     start.setMonth(start.getMonth() - 1, 1);
     end.setDate(0);
@@ -3375,6 +3734,10 @@ function rangeToDates(range: SalesFilters["range"]) {
 
 function toDateInput(date: Date) {
   return date.toISOString().slice(0, 10);
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
 }
 
 function saleStatusLabel(status: SaleSummary["status"]) {

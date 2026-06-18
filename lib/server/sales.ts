@@ -6,6 +6,14 @@ import { readWithRetry } from "@/lib/server/read-retry";
 const chartColors = ["#f4f2ec", "#9aa1a9", "#5b7567", "#d8b15d", "#8f1d1d", "#71717a"];
 const saleStatuses = new Set(["DRAFT", "WAITING_PAYMENT", "CONFIRMED", "CANCELED"]);
 const paymentMethods = new Set(["PIX", "CREDIT_CARD", "DEBIT_CARD", "BOLETO", "CASH"]);
+const businessTimeZone = "America/Sao_Paulo";
+const saoPauloUtcOffsetHours = 3;
+const businessDateFormatter = new Intl.DateTimeFormat("pt-BR", {
+  timeZone: businessTimeZone,
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric"
+});
 
 type SaleRecord = {
   id: string;
@@ -231,10 +239,13 @@ export function serializeSaleDetail(sale: SaleRecord): SaleDetail {
 
 export async function getSalesSummary(where: Prisma.SaleWhereInput, searchParams: URLSearchParams): Promise<SalesSummaryData> {
   const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startOfWeek = new Date(startOfToday);
-  startOfWeek.setDate(startOfToday.getDate() - startOfToday.getDay());
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const todayParts = getBusinessDateParts(now);
+  const startOfToday = businessDateToUtcStart(todayParts.year, todayParts.month, todayParts.day);
+  const todayLocalDate = businessLocalDate(todayParts.year, todayParts.month, todayParts.day);
+  const startOfWeekLocalDate = new Date(todayLocalDate);
+  startOfWeekLocalDate.setUTCDate(todayLocalDate.getUTCDate() - todayLocalDate.getUTCDay());
+  const startOfWeek = businessDateToUtcStart(startOfWeekLocalDate.getUTCFullYear(), startOfWeekLocalDate.getUTCMonth() + 1, startOfWeekLocalDate.getUTCDate());
+  const startOfMonth = businessDateToUtcStart(todayParts.year, todayParts.month, 1);
   const periodWhere = {
     ...where,
     createdAt: {
@@ -244,9 +255,9 @@ export async function getSalesSummary(where: Prisma.SaleWhereInput, searchParams
   };
 
   const [todaySales, weekSales, monthSales] = await Promise.all([
-    readWithRetry(() => prisma.sale.findMany({ where: { createdAt: { gte: startOfToday }, status: { not: "CANCELED" } }, select: { total: true } })),
-    readWithRetry(() => prisma.sale.findMany({ where: { createdAt: { gte: startOfWeek }, status: { not: "CANCELED" } }, select: { total: true } })),
-    readWithRetry(() => prisma.sale.findMany({ where: { createdAt: { gte: startOfMonth }, status: { not: "CANCELED" } }, select: { total: true } }))
+    readWithRetry(() => prisma.sale.findMany({ where: { createdAt: { gte: startOfToday }, status: "CONFIRMED" }, select: { total: true } })),
+    readWithRetry(() => prisma.sale.findMany({ where: { createdAt: { gte: startOfWeek }, status: "CONFIRMED" }, select: { total: true } })),
+    readWithRetry(() => prisma.sale.findMany({ where: { createdAt: { gte: startOfMonth }, status: "CONFIRMED" }, select: { total: true } }))
   ]);
   const periodSales = await readWithRetry(() =>
     prisma.sale.findMany({
@@ -262,8 +273,8 @@ export async function getSalesSummary(where: Prisma.SaleWhereInput, searchParams
   const refundedSales = periodSales.filter((sale) => sale.payments.some((payment) => payment.status === "REFUNDED")).length;
   const canceledSales = periodSales.filter((sale) => sale.status === "CANCELED").length;
   const pendingSales = periodSales.filter((sale) => sale.status === "WAITING_PAYMENT").length;
-  const commercialSales = periodSales.filter((sale) => sale.status !== "CANCELED");
-  const totalValueInFilter = commercialSales.reduce((sum, sale) => sum + Number(sale.total), 0);
+  const metricSales = activeRevenueSales;
+  const totalValueInFilter = metricSales.reduce((sum, sale) => sum + Number(sale.total), 0);
 
   return {
     salesToday: todaySales.length,
@@ -272,16 +283,16 @@ export async function getSalesSummary(where: Prisma.SaleWhereInput, searchParams
     salesWeekValue: sumSaleTotals(weekSales),
     salesMonth: monthSales.length,
     salesMonthValue: sumSaleTotals(monthSales),
-    totalSalesInFilter: commercialSales.length,
+    totalSalesInFilter: metricSales.length,
     totalValueInFilter,
-    averageTicketGeneral: commercialSales.length ? totalValueInFilter / commercialSales.length : 0,
+    averageTicketGeneral: metricSales.length ? totalValueInFilter / metricSales.length : 0,
     revenuePeriod,
     averageTicket: confirmedSales ? revenuePeriod / confirmedSales : 0,
     pendingSales,
     confirmedSales,
     refundedSales,
     canceledSales,
-    salesByDay: groupByDay(periodSales.map((sale) => ({ date: sale.createdAt, value: 1 }))),
+    salesByDay: groupByDay(metricSales.map((sale) => ({ date: sale.createdAt, value: 1 }))),
     revenueByDay: groupByDay(activeRevenueSales.map((sale) => ({ date: sale.createdAt, value: Number(sale.total) }))),
     averageTicketByDay: groupAverageTicketByDay(activeRevenueSales.map((sale) => ({ date: sale.createdAt, value: Number(sale.total) }))),
     salesByChannel: groupByLabel(periodSales.map((sale) => ({ label: sale.channel, value: 1 }))),
@@ -295,16 +306,15 @@ function sumSaleTotals(sales: Array<{ total: unknown }>) {
 
 function parseDate(value: string | null, endOfDay = false) {
   if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  if (endOfDay) date.setHours(23, 59, 59, 999);
-  return date;
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return endOfDay ? businessDateToUtcEnd(year, month, day) : businessDateToUtcStart(year, month, day);
 }
 
 function groupByDay(points: { date: Date; value: number }[]) {
   const map = new Map<string, number>();
   for (const point of points) {
-    const day = point.date.toISOString().slice(0, 10);
+    const day = formatBusinessDayKey(point.date);
     map.set(day, (map.get(day) ?? 0) + point.value);
   }
   return Array.from(map.entries()).map(([day, value]) => ({ day: day.slice(5), value }));
@@ -313,13 +323,45 @@ function groupByDay(points: { date: Date; value: number }[]) {
 function groupAverageTicketByDay(points: { date: Date; value: number }[]) {
   const map = new Map<string, { total: number; count: number }>();
   for (const point of points) {
-    const day = point.date.toISOString().slice(0, 10);
+    const day = formatBusinessDayKey(point.date);
     const current = map.get(day) ?? { total: 0, count: 0 };
     current.total += point.value;
     current.count += 1;
     map.set(day, current);
   }
   return Array.from(map.entries()).map(([day, value]) => ({ day: day.slice(5), value: value.count ? value.total / value.count : 0 }));
+}
+
+function getBusinessDateParts(date: Date) {
+  const parts = Object.fromEntries(
+    businessDateFormatter
+      .formatToParts(date)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value])
+  ) as { day: string; month: string; year: string };
+
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day)
+  };
+}
+
+function formatBusinessDayKey(date: Date) {
+  const parts = getBusinessDateParts(date);
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
+function businessLocalDate(year: number, month: number, day: number) {
+  return new Date(Date.UTC(year, month - 1, day, 12));
+}
+
+function businessDateToUtcStart(year: number, month: number, day: number) {
+  return new Date(Date.UTC(year, month - 1, day, saoPauloUtcOffsetHours, 0, 0, 0));
+}
+
+function businessDateToUtcEnd(year: number, month: number, day: number) {
+  return new Date(Date.UTC(year, month - 1, day + 1, saoPauloUtcOffsetHours, 0, 0, -1));
 }
 
 function groupByLabel(points: { label: string; value: number }[]) {

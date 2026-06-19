@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { DndContext, PointerSensor, closestCenter, pointerWithin, type CollisionDetection, type DragEndEvent, useDraggable, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
+import { DndContext, DragOverlay, PointerSensor, closestCenter, pointerWithin, type CollisionDetection, type DragEndEvent, type DragStartEvent, useDraggable, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
 import {
   Area,
   AreaChart,
@@ -138,6 +138,8 @@ type SaleDraftItem = {
   customizationNotes: string;
 };
 
+type SaleDiscountMode = "AMOUNT" | "PERCENTAGE";
+
 const navItems: NavItem[] = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: Home },
   { key: "clients", label: "Clientes", href: "/clients", icon: Users },
@@ -175,12 +177,10 @@ const orderColumns: { key: OrderStatus; label: string }[] = [
 ];
 
 const leadColumns: { key: LeadStatus; label: string }[] = [
-  { key: "NEW", label: "Novo" },
-  { key: "IN_PROGRESS", label: "Em atendimento" },
-  { key: "INTERESTED", label: "Interessado" },
-  { key: "WAITING_REPLY", label: "Aguardando resposta" },
-  { key: "CLOSED_WON", label: "Fechou compra" },
-  { key: "CLOSED_LOST", label: "Perdido" }
+  { key: "IN_PROGRESS", label: "Qualificado" },
+  { key: "CLOSED_WON", label: "Convertido" },
+  { key: "CLOSED_LOST", label: "Perdido" },
+  { key: "WAITING_REPLY", label: "Follow up" }
 ];
 
 const postSaleTypeLabels: Record<PostSaleType, string> = {
@@ -279,7 +279,7 @@ const defaultSalesFilters: SalesFilters = {
 
 const moduleDataKeys: Record<ModuleKey, DataKey[]> = {
   dashboard: ["dashboard"],
-  clients: ["customers"],
+  clients: ["customers", "products"],
   leads: ["leads"],
   products: ["products"],
   sales: ["customers", "products", "sales"],
@@ -333,6 +333,7 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [saleDraftItems, setSaleDraftItems] = useState<SaleDraftItem[]>(() => [createSaleDraftItem()]);
   const [saleDiscount, setSaleDiscount] = useState("R$ 0,00");
+  const [saleDiscountMode, setSaleDiscountMode] = useState<SaleDiscountMode>("AMOUNT");
   const [saleCustomerId, setSaleCustomerId] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -541,7 +542,13 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
     setEditingUser(null);
     setCustomerDetail(null);
     setCustomerDetailError("");
+    setSaleCustomerId("");
     setSubmitError("");
+  }
+
+  function openSaleModal(customerId = "") {
+    setSaleCustomerId(customerId);
+    openModal("sale");
   }
 
   function showToast(type: NonNullable<ToastState>["type"], message: string) {
@@ -565,8 +572,7 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
       openModal("product");
     }
     else if (module === "sales") {
-      setSaleCustomerId("");
-      openModal("sale");
+      openSaleModal();
     }
     else if (module === "payments") openModal("payment");
     else if (module === "post-sales") openModal("post-sale");
@@ -934,14 +940,56 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
   async function handleLeadSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const status = getString(form, "status") || "NEW";
-    await submitJson(editingLead ? `/api/leads/${editingLead.id}` : "/api/leads", {
+    const status = getString(form, "status") || "IN_PROGRESS";
+    const body = {
       name: getString(form, "name"),
       whatsapp: normalizePhoneBR(getString(form, "whatsapp")),
       origin: getString(form, "origin"),
       status,
       notes: getString(form, "notes")
-    }, editingLead ? "Lead atualizado com sucesso." : "Lead criado com sucesso.", editingLead ? "PATCH" : "POST", status === "CLOSED_WON" ? "all" : "leads");
+    };
+
+    if (status !== "CLOSED_WON") {
+      await submitJson(
+        editingLead ? `/api/leads/${editingLead.id}` : "/api/leads",
+        body,
+        editingLead ? "Lead atualizado com sucesso." : "Lead criado com sucesso.",
+        editingLead ? "PATCH" : "POST",
+        "leads"
+      );
+      return;
+    }
+
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      const response = await fetch(editingLead ? `/api/leads/${editingLead.id}` : "/api/leads", {
+        method: editingLead ? "PATCH" : "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body)
+      });
+      const payload = (await response.json().catch(() => ({}))) as { data?: Lead; error?: unknown };
+
+      if (!response.ok || !payload.data?.convertedCustomerId) {
+        const message = getApiErrorMessage(payload.error) || "Não foi possível converter o lead.";
+        setSubmitError(message);
+        showToast("error", message);
+        return;
+      }
+
+      await refreshData("all", { ignoreCache: true });
+      closeModal();
+      setSaleCustomerId(payload.data.convertedCustomerId);
+      openModal("sale");
+      showToast("success", "Lead convertido. Complete a nova venda.");
+    } catch {
+      setSubmitError("Falha de conexão. Tente novamente.");
+      showToast("error", "Falha de conexão. Tente novamente.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   async function handleProductSubmit(event: FormEvent<HTMLFormElement>) {
@@ -1002,9 +1050,12 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
     await submitJson("/api/sales", {
       customerId,
       channel: getString(form, "channel") || "WhatsApp",
-      discount: parseCurrencyBR(saleDiscount),
+      paymentMethod: getString(form, "paymentMethod") || "PIX",
+      discountMode: saleDiscountMode,
+      discount: saleDiscountMode === "AMOUNT" ? parseCurrencyBR(saleDiscount) : 0,
+      discountPercent: saleDiscountMode === "PERCENTAGE" ? parsePercentBR(saleDiscount) : 0,
       items
-    }, "Venda criada com sucesso.");
+    }, "Venda criada com pagamento pendente.");
   }
 
   async function handlePaymentSubmit(event: FormEvent<HTMLFormElement>) {
@@ -1166,7 +1217,7 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
               onOpenDetail={openCustomerDetail}
               onEdit={editCustomer}
               onInactivate={inactivateCustomer}
-              onCreateSale={() => openModal("sale")}
+              onCreateSale={(customer) => openSaleModal(customer.id)}
             />
           ) : null}
           {module === "leads" ? <Leads leads={leads} onCreate={() => openModal("lead")} onMove={moveLead} onEdit={editLead} /> : null}
@@ -1240,6 +1291,7 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
           sales={sales}
           saleDraftItems={saleDraftItems}
           saleDiscount={saleDiscount}
+          saleDiscountMode={saleDiscountMode}
           saleCustomerId={saleCustomerId}
           selectedPayment={selectedPayment}
           selectedOrder={selectedOrder}
@@ -1280,6 +1332,10 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
             )
           }
           onSaleDiscountChange={setSaleDiscount}
+          onSaleDiscountModeChange={(mode) => {
+            setSaleDiscountMode(mode);
+            setSaleDiscount(mode === "AMOUNT" ? "R$ 0,00" : "0");
+          }}
           onPaymentSubmit={handlePaymentSubmit}
           onPostSaleSubmit={handlePostSaleSubmit}
           onPaymentActionSubmit={handlePaymentActionSubmit}
@@ -1349,6 +1405,7 @@ function ActionModal({
   sales,
   saleDraftItems,
   saleDiscount,
+  saleDiscountMode,
   saleCustomerId,
   selectedPayment,
   selectedOrder,
@@ -1377,6 +1434,7 @@ function ActionModal({
   onSaleItemRemove,
   onSaleItemChange,
   onSaleDiscountChange,
+  onSaleDiscountModeChange,
   onPaymentSubmit,
   onPostSaleSubmit,
   onPaymentActionSubmit
@@ -1388,6 +1446,7 @@ function ActionModal({
   sales: SaleSummary[];
   saleDraftItems: SaleDraftItem[];
   saleDiscount: string;
+  saleDiscountMode: SaleDiscountMode;
   saleCustomerId: string;
   selectedPayment: Payment | null;
   selectedOrder: Order | null;
@@ -1416,6 +1475,7 @@ function ActionModal({
   onSaleItemRemove: (id: string) => void;
   onSaleItemChange: (id: string, patch: Partial<SaleDraftItem>) => void;
   onSaleDiscountChange: (value: string) => void;
+  onSaleDiscountModeChange: (mode: SaleDiscountMode) => void;
   onPaymentSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onPostSaleSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onPaymentActionSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -1540,13 +1600,12 @@ function ActionModal({
           <FormSelect
             label="Status"
             name="status"
-            defaultValue={editingLead?.statusKey ?? "NEW"}
+            defaultValue={getLeadStatusKey(editingLead) ?? "IN_PROGRESS"}
             options={[
-              ["NEW", "Novo"],
-              ["IN_PROGRESS", "Em atendimento"],
-              ["INTERESTED", "Interessado"],
-              ["WAITING_REPLY", "Aguardando resposta"],
-              ["CLOSED_WON", "Fechou compra"]
+              ["IN_PROGRESS", "Qualificado"],
+              ["CLOSED_WON", "Convertido"],
+              ["CLOSED_LOST", "Perdido"],
+              ["WAITING_REPLY", "Follow up"]
             ]}
           />
           <FormTextArea label="Observações" name="notes" maxLength={500} defaultValue={editingLead?.notes ?? undefined} />
@@ -1600,22 +1659,36 @@ function ActionModal({
   }
 
   if (activeModal === "sale") {
-    const canSubmit = customers.length > 0 && products.length > 0;
+    const selectedSaleCustomer = saleCustomerId ? customers.find((customer) => customer.id === saleCustomerId) ?? null : null;
+    const activeProducts = products.filter((product) => product.active);
+    const canSubmit = customers.length > 0 && activeProducts.length > 0 && (!saleCustomerId || Boolean(selectedSaleCustomer));
     return (
       <ModalFrame title="Nova venda" onClose={onClose}>
         <form className="space-y-4" onSubmit={onSaleSubmit}>
           {!canSubmit ? <DependencyNotice text="Cadastre ao menos um cliente e um produto antes de criar vendas reais." /> : null}
-          <FormSelect label="Cliente" name="customerId" options={customers.map((customer) => [customer.id, customer.name])} required defaultValue={saleCustomerId} />
+          {saleCustomerId ? (
+            <div className="rounded-crm border border-white/10 bg-white/[0.04] p-3 text-sm text-zinc-300">
+              <input type="hidden" name="customerId" value={saleCustomerId} />
+              <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">Cliente selecionado</p>
+              <strong className="mt-1 block text-white">{selectedSaleCustomer?.name ?? "Cliente não encontrado"}</strong>
+              {selectedSaleCustomer ? <p className="mt-1 text-xs text-zinc-500">{formatPhoneBR(selectedSaleCustomer.whatsapp)}</p> : null}
+            </div>
+          ) : (
+            <FormSelect label="Cliente" name="customerId" options={customers.map((customer) => [customer.id, customer.name])} required />
+          )}
           <SaleCartFields
-            products={products}
+            products={activeProducts}
             items={saleDraftItems}
             saleDiscount={saleDiscount}
+            saleDiscountMode={saleDiscountMode}
             onAdd={onSaleItemAdd}
             onRemove={onSaleItemRemove}
             onChange={onSaleItemChange}
             onDiscountChange={onSaleDiscountChange}
+            onDiscountModeChange={onSaleDiscountModeChange}
           />
           <FormSelect label="Canal" name="channel" options={[["WhatsApp", "WhatsApp"], ["Instagram", "Instagram"], ["Site", "Site"], ["Loja Física", "Loja Física"]]} />
+          <FormSelect label="Forma de pagamento" name="paymentMethod" options={[["PIX", "Pix"], ["CREDIT_CARD", "Cartão de crédito"], ["DEBIT_CARD", "Cartão de débito"], ["BOLETO", "Boleto"], ["CASH", "Dinheiro"]]} defaultValue="PIX" />
           <FormFooter submitting={submitting} submitError={submitError} onClose={onClose} label="Salvar venda" disabled={!canSubmit} />
         </form>
       </ModalFrame>
@@ -1623,12 +1696,13 @@ function ActionModal({
   }
 
   if (activeModal === "payment") {
-    const canSubmit = sales.length > 0;
+    const salesWithoutPayment = sales.filter((sale) => !sale.payment && sale.status !== "CANCELED");
+    const canSubmit = salesWithoutPayment.length > 0;
     return (
       <ModalFrame title="Novo pagamento" onClose={onClose}>
         <form className="space-y-4" onSubmit={onPaymentSubmit}>
-          {!canSubmit ? <DependencyNotice text="Crie uma venda antes de registrar pagamento real." /> : null}
-          <PaymentSalePicker sales={sales} />
+          {!canSubmit ? <DependencyNotice text="Todas as vendas carregadas já possuem pagamento pendente ou confirmado." /> : null}
+          {canSubmit ? <PaymentSalePicker sales={salesWithoutPayment} /> : null}
           <FormSelect label="Método" name="method" options={[["PIX", "Pix"], ["CREDIT_CARD", "Cartão de crédito"], ["DEBIT_CARD", "Cartão de débito"], ["BOLETO", "Boleto"], ["CASH", "Dinheiro"]]} />
           <FormFooter submitting={submitting} submitError={submitError} onClose={onClose} label="Registrar pagamento" disabled={!canSubmit} />
         </form>
@@ -2053,22 +2127,117 @@ function PaymentSalePicker({ sales }: Readonly<{ sales: SaleSummary[] }>) {
   );
 }
 
+function ProductPicker({
+  products,
+  value,
+  required,
+  onChange
+}: Readonly<{
+  products: Product[];
+  value: string;
+  required?: boolean;
+  onChange: (productId: string) => void;
+}>) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const selectedProduct = products.find((product) => product.id === value) ?? null;
+  const normalizedSearch = search.trim().toLowerCase();
+  const visibleProducts = normalizedSearch
+    ? products.filter((product) => [product.name, product.sku ?? "", product.category].some((field) => field.toLowerCase().includes(normalizedSearch)))
+    : products;
+
+  return (
+    <div
+      className="relative block space-y-2 text-sm text-zinc-300"
+      onBlur={(event) => {
+        const nextFocused = event.relatedTarget;
+        if (!(nextFocused instanceof Node) || !event.currentTarget.contains(nextFocused)) setOpen(false);
+      }}
+    >
+      <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">Produto</span>
+      <button
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        className={`flex w-full items-center justify-between gap-3 rounded-crm border px-3 py-3 text-left text-white outline-none transition ${open ? "border-ember/60 bg-black/80" : "border-white/10 bg-black/70"}`}
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+      >
+        <span className={`min-w-0 flex-1 truncate ${selectedProduct ? "text-white" : "text-zinc-500"}`}>
+          {selectedProduct?.name ?? "Selecione"}
+        </span>
+        <span className="shrink-0 text-xs text-zinc-500">v</span>
+      </button>
+      {open ? (
+        <div className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-crm border border-ember/30 bg-[#080808] shadow-2xl shadow-black/60">
+          <div className="border-b border-white/10 p-2">
+            <input
+              autoFocus
+              className="w-full rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-ember/60"
+              maxLength={80}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar produto..."
+              value={search}
+            />
+          </div>
+          <div className="max-h-56 overflow-y-auto p-1 soft-scroll" role="listbox">
+            <button
+              className="flex w-full rounded-crm px-3 py-2 text-left text-sm text-zinc-500 transition hover:bg-white/[0.06] hover:text-white"
+              onClick={() => {
+                onChange("");
+                setSearch("");
+                setOpen(false);
+              }}
+              type="button"
+            >
+              Selecione
+            </button>
+            {visibleProducts.map((product) => (
+              <button
+                aria-selected={product.id === value}
+                className={`flex w-full items-center justify-between gap-3 rounded-crm px-3 py-2 text-left text-sm transition ${product.id === value ? "bg-ember/15 text-white" : "text-zinc-300 hover:bg-white/[0.06] hover:text-white"}`}
+                key={product.id}
+                onClick={() => {
+                  onChange(product.id);
+                  setSearch("");
+                  setOpen(false);
+                }}
+                role="option"
+                type="button"
+              >
+                <span className="min-w-0 flex-1 truncate">{product.name}</span>
+                <span className="shrink-0 text-xs text-ember">{brl(product.price)}</span>
+              </button>
+            ))}
+            {visibleProducts.length === 0 ? (
+              <p className="px-3 py-4 text-sm text-zinc-500">Nenhum produto encontrado.</p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function SaleCartFields({
   products,
   items,
   saleDiscount,
+  saleDiscountMode,
   onAdd,
   onRemove,
   onChange,
-  onDiscountChange
+  onDiscountChange,
+  onDiscountModeChange
 }: Readonly<{
   products: Product[];
   items: SaleDraftItem[];
   saleDiscount: string;
+  saleDiscountMode: SaleDiscountMode;
   onAdd: () => void;
   onRemove: (id: string) => void;
   onChange: (id: string, patch: Partial<SaleDraftItem>) => void;
   onDiscountChange: (value: string) => void;
+  onDiscountModeChange: (mode: SaleDiscountMode) => void;
 }>) {
   const subtotal = items.reduce((sum, item) => {
     const product = products.find((candidate) => candidate.id === item.productId);
@@ -2076,7 +2245,10 @@ function SaleCartFields({
     return sum + Math.max(0, product.price * Math.max(1, item.quantity || 1) - parseCurrencyBR(item.discount));
   }, 0);
   const itemCount = items.reduce((sum, item) => sum + (item.productId ? Math.max(1, item.quantity || 1) : 0), 0);
-  const saleDiscountValue = parseCurrencyBR(saleDiscount);
+  const saleDiscountPercent = parsePercentBR(saleDiscount);
+  const saleDiscountValue = saleDiscountMode === "PERCENTAGE"
+    ? roundCurrency(subtotal * (saleDiscountPercent / 100))
+    : parseCurrencyBR(saleDiscount);
   const total = Math.max(0, subtotal - saleDiscountValue);
 
   return (
@@ -2106,22 +2278,7 @@ function SaleCartFields({
             </div>
 
             <div className="grid gap-3 lg:grid-cols-[1.25fr_0.45fr_0.75fr]">
-  <label className="block space-y-2 text-sm text-zinc-300">
-    <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">Produto</span>
-    <select
-      className="w-full rounded-crm border border-white/10 bg-black/70 px-3 py-3 text-white outline-none focus:border-ember/60"
-      value={item.productId}
-      required={index === 0}
-      onChange={(event) => onChange(item.id, { productId: event.target.value })}
-    >
-      <option value="">Selecione</option>
-      {products.map((productOption) => (
-        <option key={productOption.id} value={productOption.id}>
-          {productOption.name}
-        </option>
-      ))}
-    </select>
-  </label>
+  <ProductPicker products={products} value={item.productId} required={index === 0} onChange={(productId) => onChange(item.id, { productId })} />
 
   <label className="block space-y-2 text-sm text-zinc-300">
     <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">Quantidade</span>
@@ -2185,11 +2342,41 @@ function SaleCartFields({
         );
       })}
 
-      <FormInput label="Desconto da venda" name="discount" defaultValue={saleDiscount} mask="currency" onValueChange={onDiscountChange} />
+      <div className="grid gap-3 rounded-crm border border-white/10 bg-white/[0.025] p-3 sm:grid-cols-[0.75fr_1fr]">
+        <label className="block space-y-2 text-sm text-zinc-300">
+          <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">Tipo de desconto</span>
+          <select
+            className="w-full rounded-crm border border-white/10 bg-black/70 px-3 py-3 text-white outline-none focus:border-ember/60"
+            name="discountMode"
+            value={saleDiscountMode}
+            onChange={(event) => onDiscountModeChange(event.target.value as SaleDiscountMode)}
+          >
+            <option value="AMOUNT">Valor em R$</option>
+            <option value="PERCENTAGE">Porcentagem</option>
+          </select>
+        </label>
+        {saleDiscountMode === "PERCENTAGE" ? (
+          <label className="block space-y-2 text-sm text-zinc-300">
+            <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">Desconto da venda (%)</span>
+            <input
+              className="w-full rounded-crm border border-white/10 bg-white/[0.04] px-3 py-3 text-white outline-none focus:border-ember/60"
+              inputMode="decimal"
+              max="100"
+              min="0"
+              name="discountPercent"
+              onChange={(event) => onDiscountChange(formatPercentInput(event.target.value))}
+              placeholder="0"
+              value={saleDiscount}
+            />
+          </label>
+        ) : (
+          <FormInput label="Desconto da venda" name="discount" defaultValue={saleDiscount} mask="currency" onValueChange={onDiscountChange} />
+        )}
+      </div>
       <div className="grid gap-3 rounded-crm border border-white/10 bg-black/35 p-3 text-sm sm:grid-cols-4">
         <DetailBox label="Itens" value={String(itemCount)} />
         <DetailBox label="Subtotal" value={brl(subtotal)} />
-        <DetailBox label="Desconto" value={brl(saleDiscountValue)} />
+        <DetailBox label="Desconto" value={saleDiscountMode === "PERCENTAGE" ? `${formatPercentDisplay(saleDiscountPercent)}% (${brl(saleDiscountValue)})` : brl(saleDiscountValue)} />
         <DetailBox label="Total estimado" value={brl(total)} />
       </div>
     </div>
@@ -2351,7 +2538,7 @@ function Clients({
   onOpenDetail: (customerId: string) => void;
   onEdit: (customer: Customer) => void;
   onInactivate: (customer: Customer) => void;
-  onCreateSale: () => void;
+  onCreateSale: (customer: Customer) => void;
 }>) {
   const [page, setPage] = useState(1);
   const pageSize = 10;
@@ -2406,7 +2593,7 @@ function Clients({
                   <IconButton label="Ver detalhes" icon={ClipboardList} onClick={() => onOpenDetail(customer.id)} />
                   <IconButton label="Editar cliente" icon={Pencil} onClick={() => onEdit(customer)} />
                   <IconButton label="Abrir WhatsApp" icon={MessageCircle} onClick={() => window.open(`https://wa.me/55${customer.whatsapp.replace(/\D/g, "")}`, "_blank")} />
-                  <IconButton label="Nova venda" icon={ShoppingBag} onClick={onCreateSale} />
+                  <IconButton label="Nova venda" icon={ShoppingBag} onClick={() => onCreateSale(customer)} />
                   <IconButton label="Inativar cliente" icon={UserX} disabled={customer.status === "Inativo"} onClick={() => onInactivate(customer)} />
                 </td>
               </tr>
@@ -2429,9 +2616,11 @@ function Clients({
 
 function Leads({ leads, onCreate, onMove, onEdit }: Readonly<{ leads: Lead[]; onCreate: () => void; onMove: (leadId: string, status: LeadStatus) => void; onEdit: (lead: Lead) => void }>) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  const [activeLeadId, setActiveLeadId] = useState("");
   const [listSearch, setListSearch] = useState("");
   const [listPage, setListPage] = useState(1);
   const pageSize = 5;
+  const activeLead = leads.find((lead) => lead.id === activeLeadId) ?? null;
   const filteredListLeads = useMemo(() => {
     const search = listSearch.trim().toLowerCase();
     if (!search) return leads;
@@ -2443,15 +2632,21 @@ function Leads({ leads, onCreate, onMove, onEdit }: Readonly<{ leads: Lead[]; on
   const currentPage = Math.min(listPage, totalPages);
   const paginatedListLeads = filteredListLeads.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
+  function handleDragStart(event: DragStartEvent) {
+    setActiveLeadId(String(event.active.id));
+  }
+
   function handleDragEnd(event: DragEndEvent) {
-    if (!event.over?.id || !leadColumns.some((column) => column.key === event.over?.id)) return;
-    onMove(String(event.active.id), event.over.id as LeadStatus);
+    const destination = event.over?.id;
+    setActiveLeadId("");
+    if (!destination || !leadColumns.some((column) => column.key === destination)) return;
+    onMove(String(event.active.id), destination as LeadStatus);
   }
 
   return (
     <div className="space-y-5">
-      <DndContext sensors={sensors} collisionDetection={kanbanCollisionDetection} onDragEnd={handleDragEnd}>
-        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+      <DndContext sensors={sensors} collisionDetection={kanbanCollisionDetection} onDragStart={handleDragStart} onDragCancel={() => setActiveLeadId("")} onDragEnd={handleDragEnd}>
+        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {leadColumns.map((column) => {
             const columnLeads = leads.filter((lead) => getLeadStatusKey(lead) === column.key);
             return (
@@ -2459,6 +2654,9 @@ function Leads({ leads, onCreate, onMove, onEdit }: Readonly<{ leads: Lead[]; on
             );
           })}
         </div>
+        <DragOverlay>
+          {activeLead ? <LeadCardPreview lead={activeLead} /> : null}
+        </DragOverlay>
       </DndContext>
 
       <GlassPanel
@@ -2548,27 +2746,15 @@ function LeadColumn({ status, label, leads, onCreate, onEdit }: Readonly<{ statu
 }
 
 function LeadCard({ lead, onEdit }: Readonly<{ lead: Lead; onEdit: (lead: Lead) => void }>) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: lead.id });
-  const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: lead.id });
   return (
     <article
       ref={setNodeRef}
-      style={style}
       {...listeners}
       {...attributes}
-      className={`touch-none overflow-hidden rounded-crm border border-white/10 bg-black/36 p-3 ${isDragging ? "z-20 cursor-grabbing opacity-80" : "cursor-grab"}`}
+      className={`touch-none overflow-hidden rounded-crm border border-white/10 bg-black/36 p-3 transition-opacity ${isDragging ? "cursor-grabbing opacity-35" : "cursor-grab"}`}
     >
-      <div className="flex min-w-0 items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h3 className="break-words font-semibold leading-6 text-white">{lead.name}</h3>
-          <p className="mt-1 text-xs text-zinc-500">{lead.whatsapp}</p>
-        </div>
-        <Pill label={lead.origin} className="max-w-[46%] shrink-0 truncate" />
-      </div>
-      <div className="mt-4 flex items-center justify-between gap-3 text-xs text-zinc-400">
-        <span className="min-w-0 truncate">{lead.lastContact}</span>
-        <strong className="shrink-0 text-ember">{brl(lead.value)}</strong>
-      </div>
+      <LeadCardContent lead={lead} />
       <div className="mt-3 flex justify-end">
         <button
           className="inline-flex items-center gap-1 rounded-crm border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] font-semibold text-zinc-300 transition hover:text-white"
@@ -2587,9 +2773,39 @@ function LeadCard({ lead, onEdit }: Readonly<{ lead: Lead; onEdit: (lead: Lead) 
   );
 }
 
-function getLeadStatusKey(lead: Lead): LeadStatus {
+function LeadCardPreview({ lead }: Readonly<{ lead: Lead }>) {
+  return (
+    <article className="w-[min(260px,calc(100vw-32px))] overflow-hidden rounded-crm border border-ember/45 bg-black/92 p-3 shadow-2xl shadow-black/50">
+      <LeadCardContent lead={lead} />
+    </article>
+  );
+}
+
+function LeadCardContent({ lead }: Readonly<{ lead: Lead }>) {
+  return (
+    <>
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="break-words font-semibold leading-6 text-white">{lead.name}</h3>
+          <p className="mt-1 text-xs text-zinc-500">{lead.whatsapp}</p>
+        </div>
+        <Pill label={lead.origin} className="max-w-[46%] shrink-0 truncate" />
+      </div>
+      <div className="mt-4 flex items-center justify-between gap-3 text-xs text-zinc-400">
+        <span className="min-w-0 truncate">{lead.lastContact}</span>
+        <strong className="shrink-0 text-ember">{brl(lead.value)}</strong>
+      </div>
+    </>
+  );
+}
+
+function getLeadStatusKey(lead?: Lead | null): LeadStatus {
+  if (!lead) return "IN_PROGRESS";
+  if (lead.statusKey === "NEW") return "IN_PROGRESS";
+  if (lead.statusKey === "INTERESTED") return "IN_PROGRESS";
   if (lead.statusKey) return lead.statusKey;
-  return leadColumns.find((column) => column.label === lead.status)?.key ?? "NEW";
+  if (lead.status === "Novo") return "IN_PROGRESS";
+  return leadColumns.find((column) => column.label === lead.status)?.key ?? "IN_PROGRESS";
 }
 
 function Products({ products, onEdit }: Readonly<{ products: Product[]; onEdit: (product: Product) => void }>) {
@@ -2951,19 +3167,30 @@ function RankingBars({ items, emptyMessage }: Readonly<{ items: { name: string; 
 
 function Orders({ orders, onMove, onSelect }: Readonly<{ orders: Order[]; onMove: (orderId: string, status: OrderStatus) => void; onSelect: (order: Order) => void }>) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  const [activeOrderId, setActiveOrderId] = useState("");
+  const activeOrder = orders.find((order) => order.id === activeOrderId) ?? null;
+
+  function handleDragStart(event: DragStartEvent) {
+    setActiveOrderId(String(event.active.id));
+  }
 
   function handleDragEnd(event: DragEndEvent) {
-    if (!event.over?.id || !orderColumns.some((column) => column.key === event.over?.id)) return;
-    onMove(String(event.active.id), event.over.id as OrderStatus);
+    const destination = event.over?.id;
+    setActiveOrderId("");
+    if (!destination || !orderColumns.some((column) => column.key === destination)) return;
+    onMove(String(event.active.id), destination as OrderStatus);
   }
 
   return (
-    <DndContext sensors={sensors} collisionDetection={kanbanCollisionDetection} onDragEnd={handleDragEnd}>
+    <DndContext sensors={sensors} collisionDetection={kanbanCollisionDetection} onDragStart={handleDragStart} onDragCancel={() => setActiveOrderId("")} onDragEnd={handleDragEnd}>
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
         {orderColumns.map((column) => (
           <OrderColumn key={column.key} status={column.key} label={column.label} orders={orders.filter((order) => order.status === column.key)} onSelect={onSelect} />
         ))}
       </div>
+      <DragOverlay>
+        {activeOrder ? <OrderCardPreview order={activeOrder} /> : null}
+      </DragOverlay>
     </DndContext>
   );
 }
@@ -2988,17 +3215,33 @@ function OrderColumn({ status, label, orders, onSelect }: Readonly<{ status: Ord
 }
 
 function OrderCard({ order, onSelect }: Readonly<{ order: Order; onSelect: (order: Order) => void }>) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: order.id });
-  const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: order.id });
   return (
     <article
       ref={setNodeRef}
-      style={style}
       {...listeners}
       {...attributes}
-      onClick={() => onSelect(order)}
-      className={`touch-none rounded-crm border border-white/10 bg-white/[0.055] p-3 shadow-glow ${isDragging ? "z-20 cursor-grabbing opacity-80" : "cursor-grab"}`}
+      onClick={() => {
+        if (!isDragging) onSelect(order);
+      }}
+      className={`touch-none rounded-crm border border-white/10 bg-white/[0.055] p-3 shadow-glow transition-opacity ${isDragging ? "cursor-grabbing opacity-35" : "cursor-grab"}`}
     >
+      <OrderCardContent order={order} />
+    </article>
+  );
+}
+
+function OrderCardPreview({ order }: Readonly<{ order: Order }>) {
+  return (
+    <article className="w-[min(260px,calc(100vw-32px))] rounded-crm border border-ember/45 bg-black/92 p-3 shadow-2xl shadow-black/50">
+      <OrderCardContent order={order} />
+    </article>
+  );
+}
+
+function OrderCardContent({ order }: Readonly<{ order: Order }>) {
+  return (
+    <>
       <div className="flex min-w-0 items-start justify-between gap-2">
         <h3 className="min-w-0 truncate font-semibold text-white">{formatOrderCode(order)}</h3>
         <span className="max-w-[52%] shrink-0 truncate text-right text-xs font-semibold text-ember" title={brl(order.total)}>{brl(order.total)}</span>
@@ -3010,7 +3253,7 @@ function OrderCard({ order, onSelect }: Readonly<{ order: Order; onSelect: (orde
           <span key={item} className="rounded-crm bg-black/40 px-2 py-1 text-[11px] text-zinc-400">{item}</span>
         ))}
       </div>
-    </article>
+    </>
   );
 }
 
@@ -3680,6 +3923,31 @@ function getNumber(form: FormData, name: string) {
 
 function getMoney(form: FormData, name: string) {
   return parseCurrencyBR(getString(form, name));
+}
+
+function parsePercentBR(value: string) {
+  const parsed = Number(value.replace(",", ".").replace(/[^\d.]/g, ""));
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.min(100, Math.max(0, parsed));
+}
+
+function formatPercentInput(value: string) {
+  const normalized = value.replace(",", ".").replace(/[^\d.]/g, "");
+  if (!normalized) return "";
+  const [integerPart, ...decimalParts] = normalized.split(".");
+  const decimalPart = decimalParts.join("").slice(0, 2);
+  const nextValue = decimalParts.length > 0 ? `${integerPart.slice(0, 3)}.${decimalPart}` : integerPart.slice(0, 3);
+  const parsed = Number(nextValue);
+  if (!Number.isFinite(parsed)) return "";
+  return parsed > 100 ? "100" : nextValue;
+}
+
+function formatPercentDisplay(value: number) {
+  return value.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+}
+
+function roundCurrency(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
 function buildSalesQuery(filters: SalesFilters) {

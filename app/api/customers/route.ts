@@ -7,6 +7,7 @@ import { serializeCustomer } from "@/lib/server/serializers";
 import { customerSchema } from "@/lib/server/validators";
 import { readWithRetry } from "@/lib/server/read-retry";
 import { parseJsonBody, safeErrorResponse, warnInDevelopment } from "@/lib/server/errors";
+import { getPaidTotalsByCustomerIds } from "@/lib/server/customers";
 
 export async function GET(request: NextRequest) {
   const auth = requireAuth(request);
@@ -29,8 +30,11 @@ export async function GET(request: NextRequest) {
       orderBy: { createdAt: "desc" }
     })
   );
+  const paidTotals = await getPaidTotalsByCustomerIds(customers.map((customer) => customer.id));
 
-  return NextResponse.json({ data: customers.map(serializeCustomer) });
+  return NextResponse.json({
+    data: customers.map((customer) => serializeCustomer({ ...customer, totalSpent: paidTotals.get(customer.id) ?? 0 }))
+  });
 }
 
 export async function POST(request: NextRequest) {

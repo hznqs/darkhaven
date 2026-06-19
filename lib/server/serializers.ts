@@ -260,11 +260,11 @@ function mapCustomerStatus(status: string): Customer["status"] {
 
 function mapLeadStatus(status: string) {
   const labels: Record<string, string> = {
-    NEW: "Novo",
-    IN_PROGRESS: "Em atendimento",
-    INTERESTED: "Interessado",
-    WAITING_REPLY: "Aguardando resposta",
-    CLOSED_WON: "Fechou compra",
+    NEW: "Qualificado",
+    IN_PROGRESS: "Qualificado",
+    INTERESTED: "Qualificado",
+    WAITING_REPLY: "Follow up",
+    CLOSED_WON: "Convertido",
     CLOSED_LOST: "Perdido"
   };
   return labels[status] ?? status;
@@ -272,7 +272,9 @@ function mapLeadStatus(status: string) {
 
 function mapLeadStatusKey(status: string): LeadStatus {
   const statuses = new Set<LeadStatus>(["NEW", "IN_PROGRESS", "INTERESTED", "WAITING_REPLY", "CLOSED_WON", "CLOSED_LOST"]);
-  return statuses.has(status as LeadStatus) ? status as LeadStatus : "NEW";
+  if (status === "NEW") return "IN_PROGRESS";
+  if (status === "INTERESTED") return "IN_PROGRESS";
+  return statuses.has(status as LeadStatus) ? status as LeadStatus : "IN_PROGRESS";
 }
 
 function mapPaymentStatus(status: string): Payment["status"] {

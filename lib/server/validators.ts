@@ -60,7 +60,10 @@ const productImageUrlSchema = z.string().trim().max(500).refine((value) => {
 export const saleSchema = z.object({
   customerId: z.string().min(1),
   channel: z.enum(["WhatsApp", "Instagram", "Site", "Loja Física"]),
+  paymentMethod: z.enum(["PIX", "CREDIT_CARD", "DEBIT_CARD", "BOLETO", "CASH"]).default("PIX"),
+  discountMode: z.enum(["AMOUNT", "PERCENTAGE"]).default("AMOUNT"),
   discount: z.number().min(0).default(0),
+  discountPercent: z.number().min(0).max(100).default(0),
   items: z.array(
     z.object({
       productId: z.string().min(1),
@@ -87,13 +90,13 @@ export const customerSchema = z.object({
   tags: z.array(z.string().trim().max(40)).default([])
 });
 
-export const leadStatuses = ["NEW", "IN_PROGRESS", "INTERESTED", "WAITING_REPLY", "CLOSED_WON", "CLOSED_LOST"] as const;
+export const leadStatuses = ["IN_PROGRESS", "CLOSED_WON", "CLOSED_LOST", "WAITING_REPLY"] as const;
 
 export const leadSchema = z.object({
   name: z.string().trim().min(2, "O nome precisa ter pelo menos 2 caracteres.").max(100),
   whatsapp: z.string().transform(normalizePhoneBR).refine((value) => value.length >= 10 && value.length <= 11, "Informe um WhatsApp válido com DDD."),
   origin: z.string().trim().min(1).max(60),
-  status: z.enum(leadStatuses).default("NEW"),
+  status: z.enum(leadStatuses).default("IN_PROGRESS"),
   notes: z.string().trim().max(500).optional()
 });
 

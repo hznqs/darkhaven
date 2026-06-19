@@ -25,6 +25,10 @@ type SaleItemSnapshot = {
   subtotal: number;
 };
 
+function roundCurrency(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
 export async function GET(request: NextRequest) {
   const auth = requireAuth(request);
   if (!auth.ok) return NextResponse.json({ error: auth.message }, { status: auth.status });
@@ -115,7 +119,11 @@ export async function POST(request: NextRequest) {
   }
   const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
   const itemDiscountTotal = items.reduce((sum, item) => sum + item.discount, 0);
-  const totalDiscount = itemDiscountTotal + parsed.data.discount;
+  const saleDiscountBase = subtotal - itemDiscountTotal;
+  const saleDiscount = parsed.data.discountMode === "PERCENTAGE"
+    ? roundCurrency(saleDiscountBase * (parsed.data.discountPercent / 100))
+    : parsed.data.discount;
+  const totalDiscount = itemDiscountTotal + saleDiscount;
   const total = subtotal - totalDiscount;
   if (totalDiscount > subtotal) {
     return NextResponse.json({ error: "O desconto não pode ser maior que o subtotal da venda." }, { status: 422 });
@@ -136,6 +144,13 @@ export async function POST(request: NextRequest) {
         estimatedCost,
         estimatedProfit,
         estimatedMargin,
+        payments: {
+          create: {
+            method: parsed.data.paymentMethod,
+            amount: total,
+            status: "PENDING"
+          }
+        },
         items: {
           create: items
         }
@@ -174,6 +189,20 @@ export async function POST(request: NextRequest) {
       itemCount: sale.items.length
     }
   });
+  const pendingPayment = sale.payments[0];
+  if (pendingPayment) {
+    await writeAuditLogSafe({
+      userId: admin.userId,
+      action: "CREATE",
+      entity: "Payment",
+      entityId: pendingPayment.id,
+      metadata: {
+        saleId: sale.id,
+        amount: Number(pendingPayment.amount),
+        autoCreatedFromSale: true
+      }
+    });
+  }
 
   return NextResponse.json({ data: serializeSale(sale) }, { status: 201 });
 }

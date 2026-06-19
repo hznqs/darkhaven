@@ -7,6 +7,7 @@ import { customerSchema } from "@/lib/server/validators";
 import { readWithRetry } from "@/lib/server/read-retry";
 import { parseJsonBody } from "@/lib/server/errors";
 import { validPurchaseHistoryWhere } from "@/lib/server/purchase-history";
+import { getPaidTotalByCustomerId } from "@/lib/server/customers";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -48,7 +49,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
     })
   );
   if (!customer) return NextResponse.json({ error: "Cliente não encontrado." }, { status: 404 });
-  return NextResponse.json({ data: serializeCustomer(customer) });
+  const paidTotal = await getPaidTotalByCustomerId(id);
+  return NextResponse.json({ data: serializeCustomer({ ...customer, totalSpent: paidTotal }) });
 }
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
@@ -84,7 +86,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   });
 
   await writeAuditLogSafe({ userId: admin.userId, action: "UPDATE", entity: "Customer", entityId: id });
-  return NextResponse.json({ data: serializeCustomer(customer) });
+  const paidTotal = await getPaidTotalByCustomerId(id);
+  return NextResponse.json({ data: serializeCustomer({ ...customer, totalSpent: paidTotal }) });
 }
 
 export async function DELETE(request: NextRequest, context: RouteContext) {
@@ -97,5 +100,6 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
 
   const customer = await prisma.customer.update({ where: { id }, data: { status: "inactive" } });
   await writeAuditLogSafe({ userId: admin.userId, action: "UPDATE", entity: "Customer", entityId: id, metadata: { softDelete: true } });
-  return NextResponse.json({ data: serializeCustomer(customer) });
+  const paidTotal = await getPaidTotalByCustomerId(id);
+  return NextResponse.json({ data: serializeCustomer({ ...customer, totalSpent: paidTotal }) });
 }

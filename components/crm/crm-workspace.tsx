@@ -19,6 +19,7 @@ import {
   YAxis
 } from "recharts";
 import {
+  AlertTriangle,
   BadgeDollarSign,
   Boxes,
   CheckCircle2,
@@ -27,12 +28,14 @@ import {
   CreditCard,
   Gauge,
   Home,
+  Inbox,
   LogOut,
   Menu,
   MessageCircle,
   Package,
   Pencil,
   Plus,
+  RefreshCw,
   Search,
   Settings,
   ShoppingBag,
@@ -49,6 +52,7 @@ import type {
   Customer,
   DashboardData,
   FinanceData,
+  FinancePaymentMethod,
   Lead,
   LeadStatus,
   ModuleKey,
@@ -62,7 +66,8 @@ import type {
   Product,
   SaleDetail,
   SalesSummaryData,
-  SaleSummary
+  SaleSummary,
+  StoreSettings
 } from "@/lib/types";
 
 type NavItem = {
@@ -239,7 +244,7 @@ const emptyFinance: FinanceData = {
     averageTicket: 0
   },
   revenue: [],
-  paymentMethods: []
+  paymentMethods: [] as FinancePaymentMethod[]
 };
 
 const emptySalesSummary: SalesSummaryData = {
@@ -318,16 +323,22 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
   const [sales, setSales] = useState<SaleSummary[]>([]);
   const [salesSummary, setSalesSummary] = useState<SalesSummaryData>(emptySalesSummary);
   const [postSales, setPostSales] = useState<PostSale[]>([]);
+  const [postSaleSales, setPostSaleSales] = useState<SaleSummary[]>([]);
   const [dashboard, setDashboard] = useState<DashboardData>(emptyDashboard);
   const [finance, setFinance] = useState<FinanceData>(emptyFinance);
   const [users, setUsers] = useState<AppUser[]>([]);
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
+  const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
+  const [settingsSaving, setSettingsSaving] = useState(false);
   const [salesFilters, setSalesFilters] = useState<SalesFilters>(defaultSalesFilters);
   const [saleDetailId, setSaleDetailId] = useState("");
   const [saleDetail, setSaleDetail] = useState<SaleDetail | null>(null);
   const [saleDetailLoading, setSaleDetailLoading] = useState(false);
   const [saleDetailError, setSaleDetailError] = useState("");
   const [selectedSaleForPostSale, setSelectedSaleForPostSale] = useState<SaleSummary | null>(null);
+  const [selectedCustomerForPostSale, setSelectedCustomerForPostSale] = useState<Customer | null>(null);
+  const [postSaleCustomerId, setPostSaleCustomerId] = useState("");
+  const [postSaleSaleId, setPostSaleSaleId] = useState("");
   const [activeModal, setActiveModal] = useState<ActiveModal>(null);
   const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -464,7 +475,7 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
       const { task, result } = settled.value;
       if (!result.ok) {
         if (!loadedKeysRef.current[task.key] && !cachedKeys.has(task.key)) {
-          errors[task.key] = "Não foi possível carregar os dados. Tentar novamente.";
+          errors[task.key] = result.message ?? "Não foi possível carregar os dados.";
         }
         continue;
       }
@@ -534,6 +545,9 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
     setSelectedPayment(null);
     setSelectedOrder(null);
     setSelectedSaleForPostSale(null);
+    setSelectedCustomerForPostSale(null);
+    setPostSaleCustomerId("");
+    setPostSaleSaleId("");
     setEditingCustomer(null);
     setEditingLead(null);
     setEditingProduct(null);
@@ -577,8 +591,10 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
     else if (module === "payments") openModal("payment");
     else if (module === "post-sales") openModal("post-sale");
     else if (module === "orders") showToast("info", "Pedidos são criados automaticamente ao confirmar um pagamento.");
-    else if (module === "settings") showToast("info", "Configurações avançadas ficam para a próxima etapa.");
-    else if (module === "finance") showToast("info", "Exportação será ativada após definir o formato do relatório.");
+    else if (module === "finance") {
+      const query = buildSalesQuery(salesFilters);
+      window.open(`/api/finance/export${query}`, "_blank");
+    }
   }
 
   async function handleLogout() {
@@ -688,10 +704,37 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
     };
   }
 
+  async function ensurePostSaleSales() {
+    if (postSaleSales.length) return;
+
+    const result = await fetchData<SaleSummary[]>("/api/sales");
+    if (result.ok) {
+      setPostSaleSales(result.data);
+      return;
+    }
+
+    showToast("error", "Não foi possível carregar vendas para o pós-venda.");
+  }
+
   function openPostSaleFromSale(sale: SaleSummary) {
     closeSaleDetail();
+    setSelectedCustomerForPostSale(null);
+    setPostSaleCustomerId("");
+    setPostSaleSaleId("");
     setSelectedSaleForPostSale(sale);
+    setPostSaleCustomerId(sale.customerId);
+    setPostSaleSaleId(sale.id);
     openModal("post-sale");
+    void ensurePostSaleSales();
+  }
+
+  function openPostSaleFromCustomer(customer: Customer) {
+    setSelectedSaleForPostSale(null);
+    setSelectedCustomerForPostSale(customer);
+    setPostSaleCustomerId(customer.id);
+    setPostSaleSaleId("");
+    openModal("post-sale");
+    void ensurePostSaleSales();
   }
 
   async function openOrderFromSale(sale: SaleSummary) {
@@ -929,13 +972,14 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
     });
     const payload = (await response.json().catch(() => ({}))) as { data?: AppUser; error?: string };
     if (!response.ok || !payload.data) {
-      showToast("error", payload.error ?? "Não foi possível desativar o usuário.");
+      showToast("error", payload.error ?? "Erro ao desativar usuário.");
       return;
     }
 
-    setUsers((current) => current.map((item) => (item.id === user.id ? payload.data as AppUser : item)));
-    showToast("success", "Usuário desativado.");
+    setUsers((current) => current.map((u) => u.id === user.id ? payload.data! : u));
+    showToast("success", "Usuário desativado com sucesso.");
   }
+
 
   async function handleLeadSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1094,12 +1138,12 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
     await submitJson("/api/post-sales", {
       customerId,
       saleId: getString(form, "saleId") || undefined,
-      orderId: getString(form, "orderId") || undefined,
+      orderId: [selectedSaleForPostSale, ...postSaleSales, ...sales].filter(Boolean).find((sale) => sale?.id === getString(form, "saleId"))?.order?.id,
       type: getString(form, "type") || "FOLLOW_UP",
       priority: getString(form, "priority") || "MEDIUM",
       status: "OPEN",
       notes: getString(form, "notes"),
-      nextActionAt: getString(form, "nextActionAt") ? new Date(getString(form, "nextActionAt")).toISOString() : undefined
+      nextActionAt: getString(form, "nextActionAt") || undefined
     }, "Atendimento criado com sucesso.");
   }
 
@@ -1116,6 +1160,21 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
       isRefund ? "Pagamento estornado." : isCancel ? "Pagamento cancelado." : "Pagamento confirmado.",
       "PATCH"
     );
+  }
+
+  async function handleSettingsSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSettingsSaving(true);
+    const form = new FormData(event.currentTarget);
+    const payload = {
+      storeName: getString(form, "storeName"),
+      cnpj: getString(form, "cnpj"),
+      whatsapp: getString(form, "whatsapp"),
+      email: getString(form, "email")
+    };
+    
+    await submitJson("/api/settings", payload, "Configurações salvas com sucesso.", "PATCH", "settings");
+    setSettingsSaving(false);
   }
 
   return (
@@ -1180,10 +1239,6 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
           </div>
 
           <div className="flex flex-1 items-center justify-end gap-2">
-            <label className="hidden min-w-52 max-w-sm flex-1 items-center gap-2 rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-zinc-500 md:flex">
-              <Search className="h-4 w-4" aria-hidden />
-              <input className="w-full bg-transparent text-zinc-200 outline-none" placeholder="Buscar..." />
-            </label>
             {meta.cta ? (
               <button
                 className="inline-flex items-center gap-2 rounded-crm bg-bone px-3 py-2 text-sm font-bold text-black transition hover:bg-white"
@@ -1266,9 +1321,12 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
             />
           ) : null}
           {module === "finance" ? <Finance finance={finance} /> : null}
-          {module === "post-sales" ? <PostSales postSales={postSales} onResolve={resolvePostSale} onCreate={() => openModal("post-sale")} /> : null}
+          {module === "post-sales" ? <PostSales postSales={postSales} onResolve={resolvePostSale} onCreate={() => { openModal("post-sale"); void ensurePostSaleSales(); }} /> : null}
           {module === "settings" ? (
             <SettingsPanel
+              settings={storeSettings}
+              saving={settingsSaving}
+              onSave={handleSettingsSubmit}
               users={users}
               onCreateUser={() => {
                 setEditingUser(null);
@@ -1289,6 +1347,7 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
           products={products}
           orders={orders}
           sales={sales}
+          postSaleSales={postSaleSales}
           saleDraftItems={saleDraftItems}
           saleDiscount={saleDiscount}
           saleDiscountMode={saleDiscountMode}
@@ -1296,6 +1355,9 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
           selectedPayment={selectedPayment}
           selectedOrder={selectedOrder}
           selectedSaleForPostSale={selectedSaleForPostSale}
+          selectedCustomerForPostSale={selectedCustomerForPostSale}
+          postSaleCustomerId={postSaleCustomerId}
+          postSaleSaleId={postSaleSaleId}
           editingCustomer={editingCustomer}
           editingLead={editingLead}
           editingProduct={editingProduct}
@@ -1310,6 +1372,9 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
           onCustomerDetailRetry={() => customerDetail ? openCustomerDetail(customerDetail.id) : null}
           onCustomerEdit={editCustomer}
           onCustomerInactivate={inactivateCustomer}
+          onCustomerPostSale={openPostSaleFromCustomer}
+          onPostSaleCustomerIdChange={setPostSaleCustomerId}
+          onPostSaleSaleIdChange={setPostSaleSaleId}
           onCustomerSubmit={handleCustomerSubmit}
           onUserSubmit={handleUserSubmit}
           onLeadSubmit={handleLeadSubmit}
@@ -1361,27 +1426,38 @@ function DataBoundary({ loading, error, onRetry, children }: Readonly<{ loading:
   }
 
   if (error) {
-    return (
-      <section className="glass-panel rounded-crm p-5">
-        <p className="text-sm font-semibold text-white">{error}</p>
-        <button className="mt-4 rounded-crm bg-bone px-4 py-2 text-sm font-bold text-black" onClick={onRetry}>
-          Tentar novamente
-        </button>
-      </section>
-    );
+    return <ErrorState message={error} onRetry={onRetry} />;
   }
 
-  return <>{children}</>;
+  return <div className="animate-fade-in">{children}</div>;
 }
 
 function LoadingState() {
   return (
-    <section className="glass-panel rounded-crm p-5">
-      <div className="space-y-3">
-        <div className="h-5 w-44 rounded-crm bg-white/[0.08]" />
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {[0, 1, 2, 3].map((item) => (
-            <div key={item} className="h-28 rounded-crm border border-white/10 bg-white/[0.035]" />
+    <section className="space-y-5">
+      {/* KPI skeleton row */}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {[0, 1, 2, 3].map((item) => (
+          <article key={item} className="glass-panel rounded-crm p-4">
+            <div className="skeleton-shimmer h-3 w-20 rounded-crm" />
+            <div className="skeleton-shimmer mt-4 h-7 w-28 rounded-crm" />
+            <div className="skeleton-shimmer mt-3 h-2.5 w-16 rounded-crm" />
+          </article>
+        ))}
+      </div>
+      {/* Content skeleton */}
+      <div className="glass-panel rounded-crm p-5">
+        <div className="skeleton-shimmer mb-4 h-5 w-36 rounded-crm" />
+        <div className="space-y-3">
+          {[0, 1, 2, 3, 4].map((item) => (
+            <div key={item} className="flex items-center gap-4">
+              <div className="skeleton-shimmer h-10 w-10 shrink-0 rounded-full" />
+              <div className="flex-1 space-y-2">
+                <div className="skeleton-shimmer h-3.5 w-3/5 rounded-crm" />
+                <div className="skeleton-shimmer h-2.5 w-2/5 rounded-crm" />
+              </div>
+              <div className="skeleton-shimmer h-6 w-16 rounded-crm" />
+            </div>
           ))}
         </div>
       </div>
@@ -1389,10 +1465,41 @@ function LoadingState() {
   );
 }
 
-function EmptyState({ message }: Readonly<{ message: string }>) {
+function ErrorState({ message, onRetry }: Readonly<{ message: string; onRetry: () => void }>) {
   return (
-    <div className="rounded-crm border border-dashed border-white/14 bg-white/[0.025] px-4 py-8 text-center text-sm text-zinc-400">
-      {message}
+    <section className="glass-panel rounded-crm p-8 text-center animate-fade-in">
+      <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-ember/25 bg-ember/10">
+        <AlertTriangle className="h-6 w-6 text-ember" aria-hidden />
+      </div>
+      <h3 className="text-base font-semibold text-white">Falha ao carregar dados</h3>
+      <p className="mt-2 text-sm text-zinc-400">{message}</p>
+      <button
+        className="mt-5 inline-flex items-center gap-2 rounded-crm border border-ember/30 bg-ember/10 px-5 py-2.5 text-sm font-semibold text-ember transition hover:bg-ember/20"
+        onClick={onRetry}
+      >
+        <RefreshCw className="h-4 w-4" aria-hidden />
+        Tentar novamente
+      </button>
+    </section>
+  );
+}
+
+function EmptyState({ message, icon: Icon, action }: Readonly<{ message: string; icon?: LucideIcon; action?: { label: string; onClick: () => void } }>) {
+  return (
+    <div className="rounded-crm border border-dashed border-white/14 bg-white/[0.025] px-6 py-10 text-center animate-fade-in">
+      <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/[0.04]">
+        {Icon ? <Icon className="h-5 w-5 text-zinc-500" aria-hidden /> : <Inbox className="h-5 w-5 text-zinc-500" aria-hidden />}
+      </div>
+      <p className="text-sm text-zinc-400">{message}</p>
+      {action ? (
+        <button
+          className="mt-4 inline-flex items-center gap-2 rounded-crm border border-moss/30 bg-moss/10 px-4 py-2 text-xs font-semibold text-moss transition hover:bg-moss/20"
+          onClick={action.onClick}
+        >
+          <Plus className="h-3.5 w-3.5" aria-hidden />
+          {action.label}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -1403,6 +1510,7 @@ function ActionModal({
   products,
   orders,
   sales,
+  postSaleSales,
   saleDraftItems,
   saleDiscount,
   saleDiscountMode,
@@ -1410,6 +1518,9 @@ function ActionModal({
   selectedPayment,
   selectedOrder,
   selectedSaleForPostSale,
+  selectedCustomerForPostSale,
+  postSaleCustomerId,
+  postSaleSaleId,
   editingCustomer,
   editingLead,
   editingProduct,
@@ -1424,6 +1535,9 @@ function ActionModal({
   onCustomerDetailRetry,
   onCustomerEdit,
   onCustomerInactivate,
+  onCustomerPostSale,
+  onPostSaleCustomerIdChange,
+  onPostSaleSaleIdChange,
   onCustomerSubmit,
   onUserSubmit,
   onLeadSubmit,
@@ -1444,6 +1558,7 @@ function ActionModal({
   products: Product[];
   orders: Order[];
   sales: SaleSummary[];
+  postSaleSales: SaleSummary[];
   saleDraftItems: SaleDraftItem[];
   saleDiscount: string;
   saleDiscountMode: SaleDiscountMode;
@@ -1451,6 +1566,9 @@ function ActionModal({
   selectedPayment: Payment | null;
   selectedOrder: Order | null;
   selectedSaleForPostSale: SaleSummary | null;
+  selectedCustomerForPostSale: Customer | null;
+  postSaleCustomerId: string;
+  postSaleSaleId: string;
   editingCustomer: Customer | null;
   editingLead: Lead | null;
   editingProduct: Product | null;
@@ -1465,6 +1583,9 @@ function ActionModal({
   onCustomerDetailRetry: () => void;
   onCustomerEdit: (customer: Customer) => void;
   onCustomerInactivate: (customer: Customer) => void;
+  onCustomerPostSale: (customer: Customer) => void;
+  onPostSaleCustomerIdChange: (customerId: string) => void;
+  onPostSaleSaleIdChange: (saleId: string) => void;
   onCustomerSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onUserSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onLeadSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -1480,6 +1601,7 @@ function ActionModal({
   onPostSaleSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onPaymentActionSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }>) {
+
   if (!activeModal) return null;
 
   if (activeModal === "customer-detail") {
@@ -1487,10 +1609,7 @@ function ActionModal({
       <ModalFrame title={customerDetail ? customerDetail.name : "Detalhe do cliente"} onClose={onClose}>
         {customerDetailLoading ? <LoadingState /> : null}
         {customerDetailError ? (
-          <div className="space-y-4">
-            <EmptyState message={customerDetailError} />
-            <button className="rounded-crm bg-bone px-4 py-2 text-sm font-bold text-black" onClick={onCustomerDetailRetry}>Tentar novamente</button>
-          </div>
+          <ErrorState message={customerDetailError} onRetry={onCustomerDetailRetry} />
         ) : null}
         {customerDetail ? (
           <div className="space-y-5 text-sm">
@@ -1520,7 +1639,7 @@ function ActionModal({
                     </div>
                     <p className="mt-2 text-zinc-400">{purchase.summary}</p>
                   </div>
-                )) : <EmptyState message="Nenhuma compra recente válida nos últimos 30 dias." />}
+                )) : <EmptyState message="Nenhuma compra recente válida nos últimos 30 dias." icon={ShoppingBag} />}
               </div>
             </GlassPanel>
 
@@ -1533,7 +1652,7 @@ function ActionModal({
                       <p className="mt-1">{brl(sale.total)} · {sale.status} · {shortDate(sale.createdAt)}</p>
                       <p className="mt-1 text-zinc-500">{sale.items.slice(0, 2).join(", ") || "Sem produtos"}</p>
                     </div>
-                  )) : <EmptyState message="Nenhuma venda relacionada." />}
+                  )) : <EmptyState message="Nenhuma venda relacionada." icon={ShoppingBag} />}
                 </div>
               </GlassPanel>
               <GlassPanel title="Pedidos relacionados">
@@ -1543,7 +1662,7 @@ function ActionModal({
                       <strong className="text-white">Pedido #{order.orderNumber}</strong>
                       <p className="mt-1">{brl(order.total)} · {order.status} · {shortDate(order.createdAt)}</p>
                     </div>
-                  )) : <EmptyState message="Nenhum pedido relacionado." />}
+                  )) : <EmptyState message="Nenhum pedido relacionado." icon={ClipboardList} />}
                 </div>
               </GlassPanel>
               <GlassPanel title="Pós-venda relacionado">
@@ -1553,12 +1672,13 @@ function ActionModal({
                       <strong className="text-white">{postSaleTypeLabels[item.type]}</strong>
                       <p className="mt-1">{postSaleStatusLabels[item.status]} · {priorityLabels[item.priority]} · {shortDate(item.createdAt)}</p>
                     </div>
-                  )) : <EmptyState message="Nenhum pós-venda relacionado." />}
+                  )) : <EmptyState message="Nenhum pós-venda relacionado." icon={MessageCircle} />}
                 </div>
               </GlassPanel>
             </section>
 
             <div className="flex flex-wrap justify-end gap-2">
+              <button className="rounded-crm bg-bone px-4 py-2 text-sm font-bold text-black" onClick={() => onCustomerPostSale(customerDetail)}>Criar pós-venda</button>
               <button className="rounded-crm border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-white" onClick={() => onCustomerEdit(customerDetail)}>Editar</button>
               <button className="rounded-crm border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm font-semibold text-white" onClick={() => onCustomerInactivate(customerDetail)}>Inativar</button>
             </div>
@@ -1711,20 +1831,50 @@ function ActionModal({
   }
 
   if (activeModal === "post-sale") {
+    const basePostSaleSales = postSaleSales.length ? postSaleSales : sales;
+    const availablePostSaleSales = selectedSaleForPostSale && !basePostSaleSales.some((sale) => sale.id === selectedSaleForPostSale.id)
+      ? [selectedSaleForPostSale, ...basePostSaleSales]
+      : basePostSaleSales;
+    const filteredPostSaleSales = postSaleCustomerId
+      ? availablePostSaleSales.filter((sale) => sale.customerId === postSaleCustomerId)
+      : [];
     const canSubmit = customers.length > 0;
+    const selectedPostSaleCustomer = customers.find((customer) => customer.id === postSaleCustomerId) ?? selectedCustomerForPostSale;
+    const selectedPostSaleSale = availablePostSaleSales.find((sale) => sale.id === postSaleSaleId) ?? selectedSaleForPostSale;
+
     return (
       <ModalFrame title="Novo pós-venda" onClose={onClose}>
         <form className="space-y-4" onSubmit={onPostSaleSubmit}>
           {!canSubmit ? <DependencyNotice text="Cadastre um cliente antes de abrir atendimento." /> : null}
-          {selectedSaleForPostSale ? (
+          {selectedPostSaleCustomer || selectedPostSaleSale ? (
             <div className="rounded-crm border border-white/10 bg-white/[0.04] p-3 text-sm text-zinc-300">
-              <p className="font-semibold text-white">{formatSaleCode(selectedSaleForPostSale)}</p>
-              <p className="mt-1">{selectedSaleForPostSale.customer} - {brl(selectedSaleForPostSale.total)}</p>
+              <p className="font-semibold text-white">{selectedPostSaleCustomer?.name ?? selectedPostSaleSale?.customer}</p>
+              <p className="mt-1">
+                {selectedPostSaleSale ? `${formatSaleCode(selectedPostSaleSale)} - ${brl(selectedPostSaleSale.total)}` : "Cliente pré-selecionado para atendimento."}
+              </p>
             </div>
           ) : null}
-          <FormSelect label="Cliente" name="customerId" options={customers.map((customer) => [customer.id, customer.name])} required defaultValue={selectedSaleForPostSale?.customerId} />
-          <FormSelect label="Venda relacionada" name="saleId" options={sales.map((sale) => [sale.id, `${formatSaleCode(sale)} - ${sale.customer}`])} defaultValue={selectedSaleForPostSale?.id} />
-          <FormSelect label="Pedido relacionado" name="orderId" options={orders.map((order) => [order.id, `${formatOrderCode(order)} - ${order.customer}`])} defaultValue={selectedSaleForPostSale?.order?.id} />
+          <FormSelect
+            label="Cliente"
+            name="customerId"
+            options={customers.map((customer) => [customer.id, customer.name])}
+            required
+            value={postSaleCustomerId}
+            onValueChange={(value) => {
+              onPostSaleCustomerIdChange(value);
+              onPostSaleSaleIdChange("");
+            }}
+          />
+          <FormSelect
+            label="Venda relacionada"
+            name="saleId"
+            options={filteredPostSaleSales.map((sale) => [sale.id, `${formatSaleCode(sale)} - ${brl(sale.total)}`])}
+            value={postSaleSaleId}
+            onValueChange={onPostSaleSaleIdChange}
+            placeholder={postSaleCustomerId ? "Selecione uma venda" : "Selecione um cliente primeiro"}
+            disabled={!postSaleCustomerId || filteredPostSaleSales.length === 0}
+          />
+          {postSaleCustomerId && filteredPostSaleSales.length === 0 ? <DependencyNotice text="Este cliente ainda não possui vendas relacionadas." /> : null}
           <FormSelect
             label="Tipo"
             name="type"
@@ -1739,8 +1889,8 @@ function ActionModal({
             ]}
           />
           <FormSelect label="Prioridade" name="priority" options={[["LOW", "Baixa"], ["MEDIUM", "Média"], ["HIGH", "Alta"], ["URGENT", "Urgente"]]} />
-          <FormInput label="Próxima ação" name="nextActionAt" type="datetime-local" />
-          <FormTextArea label="Observações" name="notes" required minLength={5} maxLength={800} />
+          <FormInput label="Próxima ação" name="nextActionAt" type="date" />
+          <FormTextArea label="Observações" name="notes" maxLength={800} />
           <FormFooter submitting={submitting} submitError={submitError} onClose={onClose} label="Criar atendimento" disabled={!canSubmit} />
         </form>
       </ModalFrame>
@@ -1853,12 +2003,7 @@ function SaleDetailDrawer({
         </div>
 
         {loading ? <LoadingState /> : null}
-        {error ? (
-          <section className="glass-panel rounded-crm p-5">
-            <p className="text-sm font-semibold text-white">{error}</p>
-            <button className="mt-4 rounded-crm bg-bone px-4 py-2 text-sm font-bold text-black" onClick={onRetry}>Tentar novamente</button>
-          </section>
-        ) : null}
+        {error ? <ErrorState message={error} onRetry={onRetry} /> : null}
 
         {sale ? (
           <div className="space-y-5">
@@ -1921,7 +2066,7 @@ function SaleDetailDrawer({
                     </div>
                     {item.customizationNotes ? <p className="mt-3 rounded-crm bg-black/35 p-2 text-xs text-zinc-300">{item.customizationNotes}</p> : null}
                   </article>
-                )) : <EmptyState message="Produtos não encontrados para esta venda." />}
+                )) : <EmptyState message="Produtos não encontrados para esta venda." icon={Package} />}
               </div>
             </GlassPanel>
 
@@ -2078,18 +2223,21 @@ function FormTextArea({ label, name, required = false, minLength, maxLength, def
   );
 }
 
-function FormSelect({ label, name, options, required = false, defaultValue }: Readonly<{ label: string; name: string; options: string[][]; required?: boolean; defaultValue?: string }>) {
+function FormSelect({ label, name, options, required = false, defaultValue, value, onValueChange, placeholder, disabled = false }: Readonly<{ label: string; name: string; options: string[][]; required?: boolean; defaultValue?: string; value?: string; onValueChange?: (value: string) => void; placeholder?: string; disabled?: boolean }>) {
   return (
     <label className="block space-y-2 text-sm text-zinc-300">
       <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">{label}</span>
       <select
-        className="w-full rounded-crm border border-white/10 bg-black/70 px-3 py-3 text-white outline-none focus:border-ember/60"
+        className="w-full rounded-crm border border-white/10 bg-black/70 px-3 py-3 text-white outline-none focus:border-ember/60 disabled:cursor-not-allowed disabled:opacity-50"
         name={name}
         required={required}
-        defaultValue={defaultValue}
+        defaultValue={value === undefined ? defaultValue : undefined}
+        value={value}
+        onChange={(event) => onValueChange?.(event.target.value)}
+        disabled={disabled}
       >
-        <option value="">{required ? "Selecione" : "Nenhum"}</option>
-        {options.map(([value, optionLabel]) => <option key={value} value={value}>{optionLabel}</option>)}
+        <option value="">{placeholder ?? (required ? "Selecione" : "Nenhum")}</option>
+        {options.map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}
       </select>
     </label>
   );
@@ -2564,7 +2712,7 @@ function Clients({
         </label>
       )}
     >
-      {customers.length === 0 ? <EmptyState message="Nenhum cliente cadastrado ainda." /> : null}
+      {customers.length === 0 ? <EmptyState message="Nenhum cliente cadastrado ainda." icon={Users} /> : null}
       <div className="overflow-x-auto soft-scroll">
         {customers.length > 0 ? <table className="w-full min-w-[860px] text-left text-sm">
           <thead className="text-xs uppercase tracking-[0.18em] text-zinc-500">
@@ -2617,17 +2765,10 @@ function Clients({
 function Leads({ leads, onCreate, onMove, onEdit }: Readonly<{ leads: Lead[]; onCreate: () => void; onMove: (leadId: string, status: LeadStatus) => void; onEdit: (lead: Lead) => void }>) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   const [activeLeadId, setActiveLeadId] = useState("");
-  const [listSearch, setListSearch] = useState("");
   const [listPage, setListPage] = useState(1);
   const pageSize = 5;
   const activeLead = leads.find((lead) => lead.id === activeLeadId) ?? null;
-  const filteredListLeads = useMemo(() => {
-    const search = listSearch.trim().toLowerCase();
-    if (!search) return leads;
-    return leads.filter((lead) =>
-      [lead.name, lead.whatsapp, lead.origin, lead.status, lead.notes ?? ""].some((value) => value.toLowerCase().includes(search))
-    );
-  }, [leads, listSearch]);
+  const filteredListLeads = leads;
   const totalPages = Math.max(1, Math.ceil(filteredListLeads.length / pageSize));
   const currentPage = Math.min(listPage, totalPages);
   const paginatedListLeads = filteredListLeads.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -2659,25 +2800,8 @@ function Leads({ leads, onCreate, onMove, onEdit }: Readonly<{ leads: Lead[]; on
         </DragOverlay>
       </DndContext>
 
-      <GlassPanel
-        title="Lista detalhada de leads"
-        actions={(
-          <label className="flex min-w-60 items-center gap-2 rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-zinc-500">
-            <Search className="h-4 w-4" aria-hidden />
-            <input
-              className="w-full bg-transparent text-zinc-200 outline-none"
-              placeholder="Buscar lead..."
-              value={listSearch}
-              maxLength={80}
-              onChange={(event) => {
-                setListSearch(event.target.value);
-                setListPage(1);
-              }}
-            />
-          </label>
-        )}
-      >
-        {filteredListLeads.length === 0 ? <EmptyState message="Nenhum lead encontrado." /> : null}
+      <GlassPanel title="Lista detalhada de leads">
+        {filteredListLeads.length === 0 ? <EmptyState message="Nenhum lead encontrado." icon={Sparkles} /> : null}
         {filteredListLeads.length > 0 ? (
           <div className="overflow-x-auto soft-scroll">
             <table className="w-full min-w-[900px] text-left text-sm">
@@ -2735,7 +2859,7 @@ function LeadColumn({ status, label, leads, onCreate, onEdit }: Readonly<{ statu
         <Pill label={String(leads.length)} />
       </div>
       <div className={`${leads.length > 3 ? "max-h-[520px] overflow-y-auto pr-1 soft-scroll" : ""} space-y-3`}>
-        {leads.length === 0 ? <EmptyState message="Nenhum lead nesta etapa." /> : null}
+        {leads.length === 0 ? <EmptyState message="Nenhum lead nesta etapa." icon={Sparkles} /> : null}
         {leads.map((lead) => (
           <LeadCard key={lead.id} lead={lead} onEdit={onEdit} />
         ))}
@@ -2809,56 +2933,64 @@ function getLeadStatusKey(lead?: Lead | null): LeadStatus {
 }
 
 function Products({ products, onEdit }: Readonly<{ products: Product[]; onEdit: (product: Product) => void }>) {
+  const [page, setPage] = useState(1);
+  const itemsPerPage = 8;
+  const totalPages = Math.ceil(products.length / itemsPerPage);
+  const paginated = products.slice((page - 1) * itemsPerPage, page * itemsPerPage);
+
   if (products.length === 0) {
     return (
       <GlassPanel title="Catálogo de produtos">
-        <EmptyState message="Nenhum produto cadastrado ainda." />
+        <EmptyState message="Nenhum produto cadastrado ainda." icon={Package} />
       </GlassPanel>
     );
   }
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      {products.map((product, index) => (
-        <article key={product.id} className="glass-panel overflow-hidden rounded-crm">
-          <div className="product-shine grid aspect-[1.22] place-items-center overflow-hidden bg-black/40">
-            {product.imageUrl ? (
-              <div className="h-full w-full bg-cover bg-center" style={{ backgroundImage: `url(${product.imageUrl})` }} aria-label={`Imagem de ${product.name}`} />
-            ) : (
-              <div className={`relative h-28 w-28 rounded-full border border-white/10 bg-black/70 shadow-glow ${index % 3 === 0 ? "rotate-3" : "-rotate-2"}`}>
-                <Boxes className="absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 text-zinc-300" aria-hidden />
+    <div className="space-y-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {paginated.map((product, index) => (
+          <article key={product.id} className="glass-panel overflow-hidden rounded-crm">
+            <div className="product-shine grid aspect-[1.22] place-items-center overflow-hidden bg-black/40">
+              {product.imageUrl ? (
+                <div className="h-full w-full bg-cover bg-center" style={{ backgroundImage: `url(${product.imageUrl})` }} aria-label={`Imagem de ${product.name}`} />
+              ) : (
+                <div className={`relative h-28 w-28 rounded-full border border-white/10 bg-black/70 shadow-glow ${index % 3 === 0 ? "rotate-3" : "-rotate-2"}`}>
+                  <Boxes className="absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 text-zinc-300" aria-hidden />
+                </div>
+              )}
+            </div>
+            <div className="space-y-3 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold text-white">{product.name}</h3>
+                  <p className="text-xs text-zinc-500">{product.category}</p>
+                </div>
+                <Pill label="Ativo" />
               </div>
-            )}
-          </div>
-          <div className="space-y-3 p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="font-semibold text-white">{product.name}</h3>
-                <p className="text-xs text-zinc-500">{product.category}</p>
+              <p className="min-h-10 text-xs leading-5 text-zinc-400">{product.description}</p>
+              <div className="flex items-end justify-between">
+                <strong className="text-lg text-white">{brl(product.price)}</strong>
+                <span className="text-xs text-zinc-500">{product.sku}</span>
               </div>
-              <Pill label="Ativo" />
+              <div className="grid gap-2 text-xs text-zinc-500">
+                <span>Custo: {brl(product.cost)}</span>
+                <span>Cores: {product.colors.length ? product.colors.join(", ") : "Opcional"}</span>
+                <span>Tamanhos: {product.sizes.length ? product.sizes.join(", ") : "Opcional"}</span>
+              </div>
+              <button
+                className="inline-flex w-full items-center justify-center gap-2 rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-zinc-300 transition hover:text-white"
+                onClick={() => onEdit(product)}
+                type="button"
+              >
+                <Pencil className="h-3.5 w-3.5" aria-hidden />
+                Editar produto
+              </button>
             </div>
-            <p className="min-h-10 text-xs leading-5 text-zinc-400">{product.description}</p>
-            <div className="flex items-end justify-between">
-              <strong className="text-lg text-white">{brl(product.price)}</strong>
-              <span className="text-xs text-zinc-500">{product.sku}</span>
-            </div>
-            <div className="grid gap-2 text-xs text-zinc-500">
-              <span>Custo: {brl(product.cost)}</span>
-              <span>Cores: {product.colors.length ? product.colors.join(", ") : "Opcional"}</span>
-              <span>Tamanhos: {product.sizes.length ? product.sizes.join(", ") : "Opcional"}</span>
-            </div>
-            <button
-              className="inline-flex w-full items-center justify-center gap-2 rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-zinc-300 transition hover:text-white"
-              onClick={() => onEdit(product)}
-              type="button"
-            >
-              <Pencil className="h-3.5 w-3.5" aria-hidden />
-              Editar produto
-            </button>
-          </div>
-        </article>
-      ))}
+          </article>
+        ))}
+      </div>
+      <Pagination page={page} totalPages={totalPages} onChange={setPage} />
     </div>
   );
 }
@@ -2971,7 +3103,7 @@ function Sales({
           <div className="relative h-[340px] min-w-0 overflow-hidden rounded-crm border border-white/10 bg-[radial-gradient(circle_at_75%_20%,rgba(91,117,103,0.22),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.012))] p-3">
             <div className="pointer-events-none absolute inset-x-8 bottom-8 h-20 rounded-full bg-moss/10 blur-3xl" aria-hidden />
             {!mounted ? <ChartSkeleton /> : null}
-            {mounted && performanceSeries.length === 0 ? <EmptyState message="Sem vendas no período selecionado." /> : null}
+            {mounted && performanceSeries.length === 0 ? <EmptyState message="Sem vendas no período selecionado." icon={ShoppingBag} /> : null}
             {mounted && performanceSeries.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={performanceSeries} margin={{ top: 18, right: 12, left: 8, bottom: 8 }}>
@@ -3022,8 +3154,8 @@ function Sales({
         </div>
       </section>
 
-      <GlassPanel title="Lista de vendas" actions={<Filters labels={["Data", "Valor", "Status"]} />}>
-        {sales.length === 0 ? <EmptyState message="Nenhuma venda encontrada para este período." /> : null}
+      <GlassPanel title="Lista de vendas">
+        {sales.length === 0 ? <EmptyState message="Nenhuma venda encontrada para este período." icon={ShoppingBag} /> : null}
         {sales.length > 0 ? (
           <div className="overflow-x-auto soft-scroll">
             <table className="w-full min-w-[1060px] table-fixed text-left text-sm">
@@ -3077,34 +3209,7 @@ function Sales({
                 ))}
               </tbody>
             </table>
-            {sales.length > pageSize ? (
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-3 text-xs text-zinc-400">
-                <span>
-                  Mostrando {(currentPage - 1) * pageSize + 1}-{Math.min(currentPage * pageSize, sales.length)} de {sales.length} vendas
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    className="rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2 font-semibold text-zinc-300 disabled:cursor-not-allowed disabled:opacity-40"
-                    disabled={currentPage === 1}
-                    onClick={() => setPage((value) => Math.max(1, value - 1))}
-                    type="button"
-                  >
-                    Anterior
-                  </button>
-                  <span className="rounded-crm border border-white/10 bg-black/30 px-3 py-2 text-zinc-300">
-                    {currentPage} / {totalPages}
-                  </span>
-                  <button
-                    className="rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2 font-semibold text-zinc-300 disabled:cursor-not-allowed disabled:opacity-40"
-                    disabled={currentPage === totalPages}
-                    onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
-                    type="button"
-                  >
-                    Próxima
-                  </button>
-                </div>
-              </div>
-            ) : null}
+            <Pagination page={page} totalPages={totalPages} onChange={setPage} />
           </div>
         ) : null}
       </GlassPanel>
@@ -3140,7 +3245,7 @@ function SalesInsight({ label, value, detail }: Readonly<{ label: string; value:
 function RankingBars({ items, emptyMessage }: Readonly<{ items: { name: string; value: number; fill?: string }[]; emptyMessage: string }>) {
   const maxValue = Math.max(...items.map((item) => item.value), 0);
 
-  if (items.length === 0 || maxValue === 0) return <EmptyState message={emptyMessage} />;
+  if (items.length === 0 || maxValue === 0) return <EmptyState message={emptyMessage} icon={Gauge} />;
 
   return (
     <div className="space-y-3">
@@ -3168,7 +3273,11 @@ function RankingBars({ items, emptyMessage }: Readonly<{ items: { name: string; 
 function Orders({ orders, onMove, onSelect }: Readonly<{ orders: Order[]; onMove: (orderId: string, status: OrderStatus) => void; onSelect: (order: Order) => void }>) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   const [activeOrderId, setActiveOrderId] = useState("");
+  const [page, setPage] = useState(1);
+  const itemsPerPage = 5;
   const activeOrder = orders.find((order) => order.id === activeOrderId) ?? null;
+  const totalPages = Math.ceil(orders.length / itemsPerPage);
+  const paginated = orders.slice((page - 1) * itemsPerPage, page * itemsPerPage);
 
   function handleDragStart(event: DragStartEvent) {
     setActiveOrderId(String(event.active.id));
@@ -3182,6 +3291,7 @@ function Orders({ orders, onMove, onSelect }: Readonly<{ orders: Order[]; onMove
   }
 
   return (
+    <div className="space-y-5">
     <DndContext sensors={sensors} collisionDetection={kanbanCollisionDetection} onDragStart={handleDragStart} onDragCancel={() => setActiveOrderId("")} onDragEnd={handleDragEnd}>
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
         {orderColumns.map((column) => (
@@ -3192,6 +3302,38 @@ function Orders({ orders, onMove, onSelect }: Readonly<{ orders: Order[]; onMove
         {activeOrder ? <OrderCardPreview order={activeOrder} /> : null}
       </DragOverlay>
     </DndContext>
+    
+    <GlassPanel title="Lista de Pedidos">
+      <div className="overflow-x-auto soft-scroll">
+        <table className="w-full min-w-[700px] text-left text-sm">
+          <thead className="text-xs uppercase tracking-[0.18em] text-zinc-500">
+            <tr>
+              <th className="py-3">Pedido</th>
+              <th>Cliente</th>
+              <th>Status</th>
+              <th>Canal</th>
+              <th>Valor</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/8">
+            {paginated.map((order) => (
+              <tr key={order.id} className="text-zinc-300">
+                <td className="py-4 font-semibold text-white">
+                  <button className="hover:text-ember" onClick={() => onSelect(order)}>{formatOrderCode(order)}</button>
+                </td>
+                <td>{order.customer}</td>
+                <td><Pill label={orderColumns.find((c) => c.key === order.status)?.label ?? order.status} warning={order.status === "CANCELED"} /></td>
+                <td>{order.channel}</td>
+                <td>{brl(order.total)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {orders.length === 0 ? <div className="py-4 text-center text-sm text-zinc-500">Nenhum pedido encontrado.</div> : null}
+      </div>
+      <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+    </GlassPanel>
+    </div>
   );
 }
 
@@ -3204,7 +3346,7 @@ function OrderColumn({ status, label, orders, onSelect }: Readonly<{ status: Ord
         <Pill label={String(orders.length)} />
       </div>
       <div className={`${orders.length > 3 ? "max-h-[560px] overflow-y-auto pr-1 soft-scroll" : ""} space-y-3`}>
-        {orders.length === 0 ? <EmptyState message="Nenhum pedido nesta etapa." /> : null}
+        {orders.length === 0 ? <EmptyState message="Nenhum pedido nesta etapa." icon={ClipboardList} /> : null}
         {orders.map((order) => (
           <OrderCard key={order.id} order={order} onSelect={onSelect} />
         ))}
@@ -3273,6 +3415,9 @@ function Payments({
   onCancel: (payment: Payment) => void;
 }>) {
   const [filters, setFilters] = useState({ search: "", status: "", method: "" });
+  const [page, setPage] = useState(1);
+  const itemsPerPage = 10;
+
   const filteredPayments = useMemo(() => {
     const search = filters.search.trim().toLowerCase();
     return payments.filter((payment) => {
@@ -3282,6 +3427,11 @@ function Payments({
       return matchesSearch && matchesStatus && matchesMethod;
     });
   }, [filters, payments]);
+
+  useEffect(() => setPage(1), [filters]);
+
+  const totalPages = Math.ceil(filteredPayments.length / itemsPerPage);
+  const paginatedPayments = filteredPayments.slice((page - 1) * itemsPerPage, page * itemsPerPage);
   const pendingTotal = payments.filter((payment) => payment.status === "Pendente").reduce((sum, payment) => sum + payment.amount, 0);
   const confirmedTotal = payments.filter((payment) => payment.status === "Confirmado").reduce((sum, payment) => sum + payment.amount, 0);
   const refundedTotal = payments.filter((payment) => payment.status === "Estornado").reduce((sum, payment) => sum + payment.amount, 0);
@@ -3324,7 +3474,7 @@ function Payments({
           </select>
         </div>
 
-        {filteredPayments.length === 0 ? <EmptyState message="Nenhum pagamento encontrado." /> : null}
+        {filteredPayments.length === 0 ? <EmptyState message="Nenhum pagamento encontrado." icon={CreditCard} /> : null}
         <div className="overflow-x-auto soft-scroll">
           {filteredPayments.length > 0 ? <table className="w-full min-w-[880px] text-left text-sm">
             <thead className="text-xs uppercase tracking-[0.18em] text-zinc-500">
@@ -3339,7 +3489,7 @@ function Payments({
               </tr>
             </thead>
             <tbody className="divide-y divide-white/8">
-              {filteredPayments.map((payment) => (
+              {paginatedPayments.map((payment) => (
                 <tr key={payment.id} className="text-zinc-300">
                   <td className="py-4 font-semibold text-white">
                     <button className="hover:text-ember" onClick={() => onOpenSale(payment)}>{formatSaleCode(payment)}</button>
@@ -3363,6 +3513,7 @@ function Payments({
             </tbody>
           </table> : null}
         </div>
+        <Pagination page={page} totalPages={totalPages} onChange={setPage} />
       </GlassPanel>
     </div>
   );
@@ -3402,9 +3553,19 @@ function Finance({ finance }: Readonly<{ finance: FinanceData }>) {
         </GlassPanel>
         <GlassPanel title="Por forma de pagamento">
           <div className="space-y-3">
-            {(finance.paymentMethods.length ? finance.paymentMethods : ["Sem pagamentos confirmados"]).map((item) => (
-              <div key={item} className="rounded-crm border border-white/10 bg-white/[0.04] px-3 py-3 text-sm text-zinc-300">{item}</div>
-            ))}
+            {finance.paymentMethods.length ? (
+              finance.paymentMethods.map((item) => (
+                <div key={item.name} className="flex items-center justify-between rounded-crm border border-white/10 bg-white/[0.04] px-3 py-3 text-sm">
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full" style={{ backgroundColor: item.fill }} />
+                    <span className="text-zinc-300">{item.name}</span>
+                  </div>
+                  <span className="font-semibold text-white">{brl(item.value)}</span>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-crm border border-white/10 bg-white/[0.04] px-3 py-3 text-sm text-zinc-300">Sem pagamentos confirmados</div>
+            )}
           </div>
         </GlassPanel>
       </section>
@@ -3416,6 +3577,8 @@ function PostSales({ postSales, onResolve, onCreate }: Readonly<{ postSales: Pos
   const [typeFilter, setTypeFilter] = useState<PostSaleType | "ALL">("ALL");
   const [statusFilter, setStatusFilter] = useState<PostSaleStatus | "ALL">("ALL");
   const [priorityFilter, setPriorityFilter] = useState<Priority | "ALL">("ALL");
+  const [page, setPage] = useState(1);
+  const itemsPerPage = 4;
 
   const filtered = useMemo(
     () => postSales.filter((item) =>
@@ -3425,6 +3588,11 @@ function PostSales({ postSales, onResolve, onCreate }: Readonly<{ postSales: Pos
     ),
     [postSales, priorityFilter, statusFilter, typeFilter]
   );
+
+  useEffect(() => setPage(1), [typeFilter, statusFilter, priorityFilter]);
+
+  const totalPages = Math.ceil(filtered.length / itemsPerPage);
+  const paginated = filtered.slice((page - 1) * itemsPerPage, page * itemsPerPage);
 
   return (
     <div className="space-y-5">
@@ -3455,8 +3623,8 @@ function PostSales({ postSales, onResolve, onCreate }: Readonly<{ postSales: Pos
         }
       >
         <div className="grid gap-3 xl:grid-cols-2">
-          {filtered.length === 0 ? <EmptyState message="Nenhum atendimento de pós-venda encontrado." /> : null}
-          {filtered.map((item) => (
+          {filtered.length === 0 ? <EmptyState message="Nenhum atendimento de pós-venda encontrado." icon={MessageCircle} /> : null}
+          {paginated.map((item) => (
             <article key={item.id} className="rounded-crm border border-white/10 bg-black/36 p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -3470,9 +3638,9 @@ function PostSales({ postSales, onResolve, onCreate }: Readonly<{ postSales: Pos
                 <Pill label={postSaleStatusLabels[item.status]} warning={item.status !== "RESOLVED"} />
               </div>
 
-              <p className="mt-4 min-h-12 text-sm leading-6 text-zinc-300">{item.notes}</p>
+              <p className="mt-4 min-h-12 text-sm leading-6 text-zinc-300">{item.notes || "Sem observações."}</p>
               <div className="mt-4 grid gap-3 text-xs text-zinc-400 sm:grid-cols-2">
-                <span className="rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2">Próxima ação: {new Date(item.nextActionAt).toLocaleString("pt-BR")}</span>
+                <span className="rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2">Próxima ação: {shortDate(item.nextActionAt)}</span>
                 <span className="rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2">Status: {postSaleStatusLabels[item.status]}</span>
               </div>
 
@@ -3504,17 +3672,35 @@ function PostSales({ postSales, onResolve, onCreate }: Readonly<{ postSales: Pos
             </article>
           ))}
         </div>
+        <Pagination page={page} totalPages={totalPages} onChange={setPage} />
       </GlassPanel>
     </div>
   );
 }
 
+function Pagination({ page, totalPages, onChange }: Readonly<{ page: number; totalPages: number; onChange: (p: number) => void }>) {
+  if (totalPages <= 1) return null;
+  return (
+    <div className="mt-4 flex items-center justify-between border-t border-white/10 pt-4 text-sm text-zinc-400">
+      <button onClick={() => onChange(page - 1)} disabled={page === 1} className="hover:text-white disabled:opacity-50 transition">Anterior</button>
+      <span>Página {page} de {totalPages}</span>
+      <button onClick={() => onChange(page + 1)} disabled={page === totalPages} className="hover:text-white disabled:opacity-50 transition">Próxima</button>
+    </div>
+  );
+}
+
 function SettingsPanel({
+  settings,
+  saving,
+  onSave,
   users,
   onCreateUser,
   onEditUser,
   onDeactivateUser
 }: Readonly<{
+  settings: StoreSettings | null;
+  saving: boolean;
+  onSave: (event: FormEvent<HTMLFormElement>) => void;
   users: AppUser[];
   onCreateUser: () => void;
   onEditUser: (user: AppUser) => void;
@@ -3524,12 +3710,21 @@ function SettingsPanel({
     <div className="space-y-5">
       <div className="grid gap-5 xl:grid-cols-3">
         <GlassPanel title="Dados da loja">
-          <div className="space-y-3">
-            <Field label="Nome da loja" value="DarkHaven" />
-            <Field label="CNPJ" value="12.345.678/0001-90" />
-            <Field label="WhatsApp" value="(11) 98765-4321" />
-            <Field label="E-mail" value="contato@darkhaven.com" />
-          </div>
+          <form id="settings-form" onSubmit={onSave} className="space-y-3">
+            <Field label="Nome da loja" name="storeName" value={settings?.storeName ?? "DarkHaven"} required />
+            <Field label="CNPJ" name="cnpj" value={settings?.cnpj ?? ""} />
+            <Field label="WhatsApp" name="whatsapp" value={settings?.whatsapp ?? ""} />
+            <Field label="E-mail" name="email" value={settings?.email ?? ""} type="email" />
+            <div className="pt-2">
+              <button
+                type="submit"
+                disabled={saving}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-crm bg-moss px-4 py-3 text-sm font-bold text-white transition hover:bg-moss/80 disabled:opacity-50"
+              >
+                {saving ? "Salvando..." : "Salvar informações"}
+              </button>
+            </div>
+          </form>
         </GlassPanel>
         <GlassPanel title="Logo da loja">
           <div className="grid place-items-center rounded-crm border border-white/10 bg-black/44 p-8">
@@ -3551,7 +3746,7 @@ function SettingsPanel({
         title="Usuários"
         actions={<button className="inline-flex items-center gap-2 rounded-crm bg-bone px-3 py-2 text-sm font-bold text-black" onClick={onCreateUser}><Plus className="h-4 w-4" aria-hidden />Novo usuário</button>}
       >
-        {users.length === 0 ? <EmptyState message="Nenhum usuário cadastrado." /> : null}
+        {users.length === 0 ? <EmptyState message="Nenhum usuário cadastrado." icon={Users} /> : null}
         {users.length > 0 ? (
           <div className="overflow-x-auto soft-scroll">
             <table className="w-full min-w-[820px] text-left text-sm">
@@ -3710,11 +3905,11 @@ function Filters({ labels }: Readonly<{ labels: string[] }>) {
   );
 }
 
-function Field({ label, value }: Readonly<{ label: string; value: string }>) {
+function Field({ label, value, name, type = "text", required = false }: Readonly<{ label: string; value?: string; name?: string; type?: string; required?: boolean }>) {
   return (
     <label className="block space-y-2 text-sm text-zinc-300">
       <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">{label}</span>
-      <input className="w-full rounded-crm border border-white/10 bg-white/[0.04] px-3 py-3 text-white outline-none focus:border-ember/60" defaultValue={value} />
+      <input type={type} name={name} required={required} className="w-full rounded-crm border border-white/10 bg-white/[0.04] px-3 py-3 text-white outline-none focus:border-ember/60" defaultValue={value} />
     </label>
   );
 }
@@ -3750,7 +3945,16 @@ function useMounted() {
 }
 
 function ChartSkeleton() {
-  return <div className="h-full w-full rounded-crm border border-white/10 bg-white/[0.035]" />;
+  return (
+    <div className="relative h-full w-full overflow-hidden rounded-crm border border-white/10 bg-white/[0.035]">
+      <div className="skeleton-shimmer absolute inset-0" />
+      <div className="absolute inset-x-6 bottom-6 flex items-end justify-between gap-2">
+        {[40, 65, 50, 80, 55, 70, 45, 60].map((height, index) => (
+          <div key={index} className="flex-1 rounded-t-sm bg-white/[0.06]" style={{ height: `${height}%` }} />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function buildSalesPerformanceSeries(
@@ -3798,24 +4002,33 @@ function formatChartDayLabel(day: string) {
   return `${date}/${month}`;
 }
 
-async function fetchData<T>(url: string): Promise<{ ok: true; data: T } | { ok: false }> {
+async function fetchData<T>(url: string): Promise<{ ok: true; data: T } | { ok: false; message?: string }> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const response = await fetch(url);
       if (response.ok) {
         const payload = (await response.json()) as { data?: T };
-        if (!("data" in payload)) return { ok: false };
+        if (!("data" in payload)) return { ok: false, message: "Resposta inesperada do servidor." };
         return { ok: true, data: payload.data as T };
       }
-      if (response.status < 500) return { ok: false };
+      if (response.status === 401) return { ok: false, message: "Sessão expirada. Faça login novamente." };
+      if (response.status === 403) return { ok: false, message: "Sem permissão para acessar este recurso." };
+      if (response.status < 500) {
+        try {
+          const errorPayload = (await response.json()) as { error?: string };
+          return { ok: false, message: errorPayload.error ?? "Erro ao carregar dados." };
+        } catch {
+          return { ok: false, message: "Erro ao carregar dados." };
+        }
+      }
     } catch {
-      if (attempt === 2) return { ok: false };
+      if (attempt === 2) return { ok: false, message: "Sem conexão com o servidor. Verifique sua internet." };
     }
 
     await wait(500);
   }
 
-  return { ok: false };
+  return { ok: false, message: "Servidor indisponível. Tente novamente em instantes." };
 }
 
 async function warmWorkspaceData(salesQuery: string) {

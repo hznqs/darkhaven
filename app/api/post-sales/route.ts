@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
       customerFeedback: parsed.data.customerFeedback,
       resolution: parsed.data.resolution,
       responsibleUserId: parsed.data.responsibleUserId,
-      nextActionAt: parsed.data.nextActionAt ? new Date(parsed.data.nextActionAt) : undefined,
+      nextActionAt: parsed.data.nextActionAt ? new Date(`${parsed.data.nextActionAt}T12:00:00.000`) : undefined,
       resolvedAt: parsed.data.status === "RESOLVED" ? new Date() : undefined,
       refundRequested: parsed.data.refundRequested,
       refundReason: parsed.data.refundReason,
@@ -135,9 +135,10 @@ export async function POST(request: NextRequest) {
     await writeAuditLogSafe({
       userId: admin.userId,
       action: "REFUND_REQUEST",
-      entity: "Payment",
-      entityId: parsed.data.saleId,
+      entity: "PostSale",
+      entityId: record.id,
       metadata: {
+        saleId: parsed.data.saleId,
         reason: parsed.data.refundReason
       }
     });

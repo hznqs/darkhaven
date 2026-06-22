@@ -151,21 +151,14 @@ export const postSaleSchema = z.object({
   type: z.enum(["FEEDBACK", "COMPLAINT", "EXCHANGE", "RETURN", "REPURCHASE", "REACTIVATION", "FOLLOW_UP"]),
   status: z.enum(["OPEN", "IN_PROGRESS", "WAITING_CUSTOMER", "RESOLVED", "CANCELED"]).default("OPEN"),
   priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).default("MEDIUM"),
-  notes: z.string().min(5).max(800).optional(),
+  notes: z.string().trim().max(800).optional().or(z.literal("")),
   customerFeedback: z.string().max(800).optional(),
   resolution: z.string().max(800).optional(),
   responsibleUserId: z.string().optional(),
-  nextActionAt: z.string().datetime().optional(),
+  nextActionAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   refundRequested: z.boolean().default(false),
   refundReason: z.string().optional()
 }).superRefine((data, ctx) => {
-  if (["COMPLAINT", "EXCHANGE", "RETURN"].includes(data.type) && !data.notes?.trim()) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["notes"],
-      message: "Observação obrigatória para reclamação, troca e devolução."
-    });
-  }
 
   if ((data.type === "RETURN" || data.refundRequested) && !data.refundReason?.trim()) {
     ctx.addIssue({

@@ -42,43 +42,50 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
   if (body.data.action !== "cancel") return NextResponse.json({ error: "Ação não suportada." }, { status: 422 });
 
-  const sale = await prisma.sale.findUnique({
-    where: { id },
-    include: { payments: true }
-  });
-  if (!sale) return NextResponse.json({ error: "Venda não encontrada." }, { status: 404 });
-  if (sale.status === "CANCELED") return NextResponse.json({ error: "Venda já cancelada." }, { status: 409 });
-  if (sale.payments.some((payment) => payment.status === "CONFIRMED")) {
-    return NextResponse.json({ error: "Venda paga deve ser estornada, não cancelada." }, { status: 409 });
-  }
-
-  const updated = await prisma.sale.update({
-    where: { id },
-    data: {
-      status: "CANCELED",
-      payments: {
-        updateMany: {
-          where: { status: "PENDING" },
-          data: { status: "CANCELED", reason: body.data.reason?.slice(0, 300) ?? "Venda cancelada." }
-        }
-      }
-    },
-    include: {
-      customer: true,
-      items: { include: { product: true } },
-      payments: { orderBy: { createdAt: "desc" } },
-      orders: { orderBy: { createdAt: "desc" } },
-      postSales: true
+  try {
+    const sale = await prisma.sale.findUnique({
+      where: { id },
+      include: { payments: true }
+    });
+    if (!sale) return NextResponse.json({ error: "Venda não encontrada." }, { status: 404 });
+    if (sale.status === "CANCELED") return NextResponse.json({ error: "Venda já cancelada." }, { status: 409 });
+    if (sale.payments.some((payment) => payment.status === "CONFIRMED")) {
+      return NextResponse.json({ error: "Venda paga deve ser estornada, não cancelada." }, { status: 409 });
     }
-  });
 
-  await writeAuditLogSafe({
-    userId: admin.userId,
-    action: "UPDATE",
-    entity: "Sale",
-    entityId: id,
-    metadata: { canceled: true }
-  });
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.sale.update({
+        where: { id },
+        data: {
+          status: "CANCELED",
+          payments: {
+            updateMany: {
+              where: { status: "PENDING" },
+              data: { status: "CANCELED", reason: body.data.reason?.slice(0, 300) ?? "Venda cancelada." }
+            }
+          }
+        },
+        include: {
+          customer: true,
+          items: { include: { product: true } },
+          payments: { orderBy: { createdAt: "desc" } },
+          orders: { orderBy: { createdAt: "desc" } },
+          postSales: true
+        }
+      });
+      return result;
+    });
 
-  return NextResponse.json({ data: serializeSaleDetail(updated) });
+    await writeAuditLogSafe({
+      userId: admin.userId,
+      action: "UPDATE",
+      entity: "Sale",
+      entityId: id,
+      metadata: { canceled: true, reason: body.data.reason?.slice(0, 300) }
+    });
+
+    return NextResponse.json({ data: serializeSaleDetail(updated) });
+  } catch (error) {
+    return NextResponse.json({ error: "Não foi possível cancelar a venda." }, { status: 500 });
+  }
 }

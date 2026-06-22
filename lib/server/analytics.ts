@@ -125,7 +125,7 @@ export async function getFinanceData() {
         label: payment.method,
         value: Number(payment.amount)
       }))
-    ).map((entry) => `${formatMethod(entry.name)} ${entry.value.toFixed(0)}%`)
+    )
   };
 }
 

@@ -76,6 +76,13 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   if (!admin.ok) return NextResponse.json({ error: admin.message }, { status: admin.status });
 
   const { id } = await context.params;
+
+  const existing = await prisma.lead.findUnique({ where: { id }, select: { id: true, convertedCustomerId: true } });
+  if (!existing) return NextResponse.json({ error: "Lead não encontrado." }, { status: 404 });
+  if (existing.convertedCustomerId) {
+    return NextResponse.json({ error: "Lead convertido não pode ser excluído." }, { status: 409 });
+  }
+
   await prisma.lead.delete({ where: { id } });
   await writeAuditLogSafe({ userId: admin.userId, action: "DELETE", entity: "Lead", entityId: id });
   return NextResponse.json({ data: { id } });

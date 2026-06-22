@@ -257,6 +257,12 @@ export type DashboardData = {
   revenueByChannel: { name: string; value: number; fill: string }[];
 };
 
+export type FinancePaymentMethod = {
+  name: string;
+  value: number;
+  fill: string;
+};
+
 export type FinanceData = {
   summary: {
     revenue: number;
@@ -268,7 +274,18 @@ export type FinanceData = {
     averageTicket: number;
   };
   revenue: { day: string; value: number }[];
-  paymentMethods: string[];
+  paymentMethods: FinancePaymentMethod[];
+};
+
+export type StoreSettings = {
+  id: string;
+  storeName: string;
+  cnpj?: string | null;
+  whatsapp?: string | null;
+  email?: string | null;
+  theme: string;
+  glassMode: boolean;
+  updatedAt: string;
 };
 
 export type PostSaleType =

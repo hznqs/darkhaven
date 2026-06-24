@@ -51,13 +51,15 @@ export async function POST(request: NextRequest) {
       }
     });
     const safeUser = sanitizeUser(updated);
+    const remember = Boolean((body.data as Record<string, unknown>).remember);
+    const maxAge = remember ? 60 * 60 * 24 * 30 : 60 * 60 * 8; // 30 dias ou 8h
     const response = NextResponse.json({ data: safeUser });
     response.cookies.set(sessionCookieName, signSession(safeUser), {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
       path: "/",
-      maxAge: 60 * 60 * 8
+      maxAge
     });
     return response;
   } catch (error) {

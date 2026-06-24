@@ -29,6 +29,7 @@ import {
   Gauge,
   Home,
   Inbox,
+  LayoutDashboard,
   LogOut,
   Menu,
   MessageCircle,
@@ -147,15 +148,23 @@ type SaleDiscountMode = "AMOUNT" | "PERCENTAGE";
 
 const navItems: NavItem[] = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: Home },
-  { key: "clients", label: "Clientes", href: "/clients", icon: Users },
   { key: "leads", label: "Leads", href: "/leads", icon: Sparkles },
-  { key: "products", label: "Produtos", href: "/products", icon: Package },
+  { key: "clients", label: "Clientes", href: "/clients", icon: Users },
   { key: "sales", label: "Vendas", href: "/sales", icon: ShoppingBag },
   { key: "orders", label: "Pedidos", href: "/orders", icon: ClipboardList },
   { key: "payments", label: "Pagamentos", href: "/payments", icon: CreditCard },
   { key: "finance", label: "Financeiro", href: "/finance", icon: BadgeDollarSign },
   { key: "post-sales", label: "Pós-venda", href: "/post-sales", icon: MessageCircle },
+  { key: "products", label: "Produtos", href: "/products", icon: Package },
   { key: "settings", label: "Configurações", href: "/settings", icon: Settings }
+];
+
+const mobileNavItems: { key: ModuleKey; label: string; href: string; icon: LucideIcon; center?: boolean }[] = [
+  { key: "sales", label: "Vendas", href: "/sales", icon: ShoppingBag },
+  { key: "payments", label: "Pagamentos", href: "/payments", icon: CreditCard },
+  { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, center: true },
+  { key: "products", label: "Produtos", href: "/products", icon: Package },
+  { key: "finance", label: "Financeiro", href: "/finance", icon: BadgeDollarSign }
 ];
 
 const moduleMeta: Record<ModuleKey, { title: string; eyebrow: string; cta?: string }> = {
@@ -306,7 +315,6 @@ const kanbanCollisionDetection: CollisionDetection = (args) => {
 
 export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
   const pathname = usePathname();
-  const [mobileOpen, setMobileOpen] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerSearch, setCustomerSearch] = useState("");
   const [customerDetail, setCustomerDetail] = useState<Customer | null>(null);
@@ -1178,25 +1186,24 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
   }
 
   return (
-    <main className="min-h-screen lg:pl-[248px]">
-  <aside
-    className={`fixed inset-y-0 left-0 z-50 h-screen w-72 overflow-y-auto border-r border-white/10 bg-black/84 p-4 shadow-glass backdrop-blur-2xl transition soft-scroll lg:w-[248px] lg:translate-x-0 ${
-      mobileOpen ? "translate-x-0" : "-translate-x-full"
-    }`}
-  >
-    <Link
-      href="/dashboard"
-      className="mb-8 flex h-32 items-center justify-center overflow-hidden rounded-crm px-2"
-    >
-      <Image
-        src="/brand/logo-darkhaven.png"
-        alt="DarkHaven"
-        width={260}
-        height={180}
-        className="h-40 w-56 object-cover object-center"
-        priority
-      />
-    </Link>
+    <main className="min-h-screen pb-24 lg:pb-0 lg:pl-[248px]">
+      {/* Desktop sidebar — hidden on mobile */}
+      <aside
+        className="fixed inset-y-0 left-0 z-50 hidden h-screen w-[248px] overflow-y-auto border-r border-white/10 bg-black/84 p-4 shadow-glass backdrop-blur-2xl soft-scroll lg:block"
+      >
+        <Link
+          href="/dashboard"
+          className="mb-8 flex h-32 items-center justify-center overflow-hidden rounded-crm px-2"
+        >
+          <Image
+            src="/brand/logo-darkhaven.png"
+            alt="DarkHaven"
+            width={260}
+            height={180}
+            className="h-40 w-56 object-cover object-center"
+            priority
+          />
+        </Link>
         <nav className="space-y-1">
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -1205,7 +1212,6 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
               <Link
                 key={item.key}
                 href={item.href}
-                onClick={() => setMobileOpen(false)}
                 className={`flex items-center gap-3 rounded-crm px-3 py-2.5 text-sm transition ${
                   active
                     ? "border border-white/12 bg-white/[0.09] text-white shadow-glow"
@@ -1220,18 +1226,12 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
         </nav>
       </aside>
 
-      {mobileOpen ? <button aria-label="Fechar menu" className="fixed inset-0 z-30 bg-black/60 lg:hidden" onClick={() => setMobileOpen(false)} /> : null}
+      {/* Mobile bottom navigation bar */}
+      <MobileBottomNav pathname={pathname} />
 
       <section className="min-w-0 px-4 py-4 md:px-6 lg:px-8">
         <header className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-crm border border-white/10 bg-black/36 px-3 py-3 backdrop-blur-xl">
           <div className="flex min-w-0 items-center gap-3">
-            <button
-              className="inline-flex h-10 w-10 items-center justify-center rounded-crm border border-white/10 bg-white/[0.04] text-white lg:hidden"
-              aria-label="Abrir menu"
-              onClick={() => setMobileOpen(true)}
-            >
-              <Menu className="h-5 w-5" aria-hidden />
-            </button>
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-ember">{meta.eyebrow}</p>
               <h1 className="truncate text-2xl font-semibold text-white md:text-3xl">{meta.title}</h1>
@@ -2581,15 +2581,15 @@ function Dashboard({ dashboard }: Readonly<{ dashboard: DashboardData }>) {
   const channelSeries = dashboard.revenueByChannel;
 
   return (
-    <div className="space-y-5">
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="space-y-4 lg:space-y-5">
+      <section className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
         <Metric label="Faturamento" value={brl(dashboard.kpis.revenue)} hint="dados atualizados" />
         <Metric label="Vendas hoje" value={String(dashboard.kpis.salesToday)} hint="vendas criadas hoje" />
         <Metric label="Vendas semana" value={String(dashboard.kpis.salesWeek)} hint="semana atual" />
         <Metric label="Vendas mês" value={String(dashboard.kpis.salesMonth)} hint="mês atual" />
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
         <Metric label="Vendas confirmadas" value={String(dashboard.kpis.sales)} hint="pagas/confirmadas" />
         <Metric label="Ticket médio" value={brl(dashboard.kpis.averageTicket)} hint="média das vendas" />
         <Metric label="Lucro estimado" value={brl(dashboard.kpis.estimatedProfit)} hint="total - custo estimado" />
@@ -2598,12 +2598,12 @@ function Dashboard({ dashboard }: Readonly<{ dashboard: DashboardData }>) {
 
       <section className="grid gap-5 xl:grid-cols-[1.35fr_0.75fr]">
         <GlassPanel title="Faturamento do mês">
-          <div className="mb-4 grid gap-3 sm:grid-cols-3">
-            <SalesInsight label="Total mensal" value={brl(revenueTotal)} detail="pagamentos confirmados" />
-            <SalesInsight label="Melhor dia do mês" value={bestRevenueDay?.day ?? "Sem dados"} detail={bestRevenueDay ? brl(bestRevenueDay.value) : "sem faturamento"} />
-            <SalesInsight label="Ticket médio" value={brl(dashboard.kpis.averageTicket)} detail={`${dashboard.kpis.sales} vendas confirmadas`} />
+          <div className="mb-3 grid grid-cols-3 gap-2 sm:mb-4 sm:gap-3">
+            <SalesInsight label="Total mensal" value={brl(revenueTotal)} detail="confirmados" />
+            <SalesInsight label="Melhor dia" value={bestRevenueDay?.day ?? "--"} detail={bestRevenueDay ? brl(bestRevenueDay.value) : "sem dados"} />
+            <SalesInsight label="Ticket médio" value={brl(dashboard.kpis.averageTicket)} detail={`${dashboard.kpis.sales} vendas`} />
           </div>
-          <div className="relative h-72 overflow-hidden rounded-crm border border-white/10 bg-[radial-gradient(circle_at_70%_18%,rgba(216,177,93,0.18),transparent_34%),radial-gradient(circle_at_20%_80%,rgba(91,117,103,0.18),transparent_32%),linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.012))] p-3">
+          <div className="relative h-52 overflow-hidden rounded-crm border border-white/10 bg-[radial-gradient(circle_at_70%_18%,rgba(216,177,93,0.18),transparent_34%),radial-gradient(circle_at_20%_80%,rgba(91,117,103,0.18),transparent_32%),linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.012))] p-3 sm:h-72">
             <div className="pointer-events-none absolute inset-x-10 bottom-7 h-16 rounded-full bg-ember/10 blur-3xl" aria-hidden />
             {mounted ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -2629,8 +2629,8 @@ function Dashboard({ dashboard }: Readonly<{ dashboard: DashboardData }>) {
         </GlassPanel>
 
         <GlassPanel title="Vendas por canal">
-          <div className="grid min-h-72 place-items-center gap-4 sm:grid-cols-[1fr_1fr] xl:grid-cols-1">
-            <div className="h-44 w-full">
+          <div className="grid min-h-48 place-items-center gap-4 sm:min-h-72 sm:grid-cols-[1fr_1fr] xl:grid-cols-1">
+            <div className="h-32 w-full sm:h-44">
               {mounted ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
@@ -2660,12 +2660,12 @@ function Dashboard({ dashboard }: Readonly<{ dashboard: DashboardData }>) {
         </GlassPanel>
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <section className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 xl:grid-cols-5">
         <Metric label="Leads" value={String(dashboard.kpis.leads)} hint="funil comercial" />
-        <Metric label="Atendimentos pós-venda" value={String(dashboard.kpis.postSales)} hint="em operação" warning />
-        <Metric label="Clientes para reativação" value={String(dashboard.kpis.reactivationCustomers)} hint="clientes inativos" warning />
-        <Metric label="Pedidos em produção" value={String(dashboard.kpis.productionOrders)} hint="fila sob demanda" />
-        <Metric label="Pagamentos pendentes" value={String(dashboard.kpis.pendingPayments)} hint="validar manualmente" warning />
+        <Metric label="Pós-venda" value={String(dashboard.kpis.postSales)} hint="em operação" warning />
+        <Metric label="Reativação" value={String(dashboard.kpis.reactivationCustomers)} hint="clientes inativos" warning />
+        <Metric label="Em produção" value={String(dashboard.kpis.productionOrders)} hint="fila sob demanda" />
+        <Metric label="Pgtos pendentes" value={String(dashboard.kpis.pendingPayments)} hint="validar manualmente" warning />
       </section>
     </div>
   );
@@ -2948,10 +2948,10 @@ function Products({ products, onEdit }: Readonly<{ products: Product[]; onEdit: 
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
         {paginated.map((product, index) => (
           <article key={product.id} className="glass-panel overflow-hidden rounded-crm">
-            <div className="product-shine grid aspect-[1.22] place-items-center overflow-hidden bg-black/40">
+            <div className="product-shine grid aspect-square place-items-center overflow-hidden bg-black/40 sm:aspect-[1.22]">
               {product.imageUrl ? (
                 <div className="h-full w-full bg-cover bg-center" style={{ backgroundImage: `url(${product.imageUrl})` }} aria-label={`Imagem de ${product.name}`} />
               ) : (
@@ -2960,31 +2960,31 @@ function Products({ products, onEdit }: Readonly<{ products: Product[]; onEdit: 
                 </div>
               )}
             </div>
-            <div className="space-y-3 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="font-semibold text-white">{product.name}</h3>
-                  <p className="text-xs text-zinc-500">{product.category}</p>
+            <div className="space-y-2 p-3 sm:space-y-3 sm:p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h3 className="truncate text-sm font-semibold text-white sm:text-base">{product.name}</h3>
+                  <p className="text-[10px] text-zinc-500 sm:text-xs">{product.category}</p>
                 </div>
                 <Pill label="Ativo" />
               </div>
-              <p className="min-h-10 text-xs leading-5 text-zinc-400">{product.description}</p>
+              <p className="hidden text-xs leading-5 text-zinc-400 sm:block sm:min-h-10">{product.description}</p>
               <div className="flex items-end justify-between">
-                <strong className="text-lg text-white">{brl(product.price)}</strong>
-                <span className="text-xs text-zinc-500">{product.sku}</span>
+                <strong className="text-base text-white sm:text-lg">{brl(product.price)}</strong>
+                <span className="hidden text-xs text-zinc-500 sm:inline">{product.sku}</span>
               </div>
-              <div className="grid gap-2 text-xs text-zinc-500">
+              <div className="hidden gap-2 text-xs text-zinc-500 sm:grid">
                 <span>Custo: {brl(product.cost)}</span>
                 <span>Cores: {product.colors.length ? product.colors.join(", ") : "Opcional"}</span>
                 <span>Tamanhos: {product.sizes.length ? product.sizes.join(", ") : "Opcional"}</span>
               </div>
               <button
-                className="inline-flex w-full items-center justify-center gap-2 rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-zinc-300 transition hover:text-white"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-crm border border-white/10 bg-white/[0.04] px-2 py-1.5 text-[11px] font-semibold text-zinc-300 transition hover:text-white sm:px-3 sm:py-2 sm:text-xs"
                 onClick={() => onEdit(product)}
                 type="button"
               >
-                <Pencil className="h-3.5 w-3.5" aria-hidden />
-                Editar produto
+                <Pencil className="h-3 w-3 sm:h-3.5 sm:w-3.5" aria-hidden />
+                Editar
               </button>
             </div>
           </article>
@@ -3036,12 +3036,12 @@ function Sales({
   }
 
   return (
-    <div className="space-y-5">
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <SalesMetric label="Vendas hoje" value={brl(summary.salesTodayValue)} detail={`${summary.salesToday} vendas realizadas`} />
-        <SalesMetric label="Vendas da semana" value={brl(summary.salesWeekValue)} detail={`${summary.salesWeek} vendas na semana atual`} />
-        <SalesMetric label="Vendas do mês" value={brl(summary.salesMonthValue)} detail={`${summary.salesMonth} vendas no mês atual`} />
-        <SalesMetric label="Ticket médio geral" value={brl(summary.averageTicketGeneral)} detail={`baseado em ${summary.totalSalesInFilter} vendas`} />
+    <div className="space-y-4 lg:space-y-5">
+      <section className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
+        <SalesMetric label="Vendas hoje" value={brl(summary.salesTodayValue)} detail={`${summary.salesToday} vendas`} />
+        <SalesMetric label="Semana" value={brl(summary.salesWeekValue)} detail={`${summary.salesWeek} vendas`} />
+        <SalesMetric label="Mês" value={brl(summary.salesMonthValue)} detail={`${summary.salesMonth} vendas`} />
+        <SalesMetric label="Ticket médio" value={brl(summary.averageTicketGeneral)} detail={`${summary.totalSalesInFilter} vendas`} />
       </section>
 
       <GlassPanel title="Filtros de vendas">
@@ -3095,12 +3095,12 @@ function Sales({
 
       <section className="grid gap-5 xl:grid-cols-[1.55fr_0.75fr]">
         <GlassPanel title="Desempenho do período">
-          <div className="mb-4 grid gap-3 md:grid-cols-3">
-            <SalesInsight label="Melhor dia" value={bestDay ? bestDay.day : "Sem vendas"} detail={bestDay ? `${brl(bestDay.revenue)} em receita` : "Sem leitura no período"} />
-            <SalesInsight label="Canal principal" value={topChannel?.name ?? "Sem canal"} detail={topChannel ? `${topChannel.value} vendas` : "Sem vendas por canal"} />
-            <SalesInsight label="Status dominante" value={topStatus?.name ?? "Sem status"} detail={topStatus ? `${topStatus.value} vendas` : "Sem status no período"} />
+          <div className="mb-3 grid grid-cols-3 gap-2 sm:mb-4 sm:gap-3">
+            <SalesInsight label="Melhor dia" value={bestDay ? bestDay.day : "--"} detail={bestDay ? brl(bestDay.revenue) : "sem dados"} />
+            <SalesInsight label="Canal" value={topChannel?.name ?? "--"} detail={topChannel ? `${topChannel.value} vendas` : "sem dados"} />
+            <SalesInsight label="Status" value={topStatus?.name ?? "--"} detail={topStatus ? `${topStatus.value} vendas` : "sem dados"} />
           </div>
-          <div className="relative h-[340px] min-w-0 overflow-hidden rounded-crm border border-white/10 bg-[radial-gradient(circle_at_75%_20%,rgba(91,117,103,0.22),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.012))] p-3">
+          <div className="relative h-56 min-w-0 overflow-hidden rounded-crm border border-white/10 bg-[radial-gradient(circle_at_75%_20%,rgba(91,117,103,0.22),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.012))] p-3 sm:h-[340px]">
             <div className="pointer-events-none absolute inset-x-8 bottom-8 h-20 rounded-full bg-moss/10 blur-3xl" aria-hidden />
             {!mounted ? <ChartSkeleton /> : null}
             {mounted && performanceSeries.length === 0 ? <EmptyState message="Sem vendas no período selecionado." icon={ShoppingBag} /> : null}
@@ -3157,60 +3157,89 @@ function Sales({
       <GlassPanel title="Lista de vendas">
         {sales.length === 0 ? <EmptyState message="Nenhuma venda encontrada para este período." icon={ShoppingBag} /> : null}
         {sales.length > 0 ? (
-          <div className="overflow-x-auto soft-scroll">
-            <table className="w-full min-w-[1060px] table-fixed text-left text-sm">
-              <colgroup>
-                <col className="w-[7.5%]" />
-                <col className="w-[7%]" />
-                <col className="w-[12%]" />
-                <col className="w-[15.5%]" />
-                <col className="w-[8%]" />
-                <col className="w-[11.5%]" />
-                <col className="w-[14%]" />
-                <col className="w-[9%]" />
-                <col className="w-[7.5%]" />
-                <col className="w-[8%]" />
-              </colgroup>
-              <thead className="text-xs uppercase tracking-[0.18em] text-zinc-500">
-                <tr>
-                  <th className="px-2 py-3 first:pl-0">Venda</th>
-                  <th className="px-2 py-3">Data</th>
-                  <th className="px-2 py-3">Cliente</th>
-                  <th className="px-2 py-3">Produtos</th>
-                  <th className="px-2 py-3">Canal</th>
-                  <th className="px-2 py-3">Pagamento</th>
-                  <th className="px-2 py-3">Status</th>
-                  <th className="px-2 py-3">Total</th>
-                  <th className="px-2 py-3">Ticket</th>
-                  <th className="px-2 py-3">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/8">
-                {paginatedSales.map((sale) => (
-                  <tr key={sale.id} className="cursor-pointer text-zinc-300 transition hover:bg-white/[0.035]" onClick={() => onOpenDetail(sale.id)}>
-                    <td className="whitespace-nowrap px-2 py-4 first:pl-0 font-semibold text-white">{formatSaleCode(sale)}</td>
-                    <td className="whitespace-nowrap px-2 py-4">{shortDate(sale.createdAt)}</td>
-                    <td className="px-2 py-4"><div className="truncate">{sale.customer}</div></td>
-                    <td className="px-2 py-4"><div className="truncate">{sale.items.map((item) => item.productName).join(", ") || "Sem produtos"}</div></td>
-                    <td className="whitespace-nowrap px-2 py-4">{sale.channel}</td>
-                    <td className="px-2 py-4"><div className="truncate">{sale.payment ? `${sale.payment.method} · ${sale.payment.status}` : "Sem pagamento"}</div></td>
-                    <td className="overflow-hidden whitespace-nowrap px-2 py-4"><Pill label={saleStatusLabel(sale.status)} warning={sale.status !== "CONFIRMED"} /></td>
-                    <td className="whitespace-nowrap px-2 py-4 font-semibold text-white">{brl(sale.total)}</td>
-                    <td className="whitespace-nowrap px-2 py-4">{brl(sale.ticket)}</td>
-                    <td className="grid grid-cols-2 gap-1.5 px-2 py-3" onClick={(event) => event.stopPropagation()}>
-                      <IconButton label="Ver detalhes" icon={ClipboardList} onClick={() => onOpenDetail(sale.id)} />
-                      <IconButton label="Copiar resumo" icon={Copy} onClick={() => navigator.clipboard?.writeText(buildSaleSummary(sale))} />
-                      <IconButton label="Abrir WhatsApp" icon={MessageCircle} onClick={() => openWhatsapp(sale.customerWhatsapp)} disabled={!sale.customerWhatsapp} />
-                      <IconButton label="Criar pós-venda" icon={MessageCircle} onClick={() => onCreatePostSale(sale)} />
-                      <IconButton label="Ver pedido relacionado" icon={Package} disabled={!sale.order} onClick={() => onOpenOrder(sale)} />
-                      <IconButton label="Ir para Pagamentos" icon={CreditCard} onClick={() => onOpenPayments(sale)} />
-                    </td>
+          <>
+            {/* Mobile: cards */}
+            <div className="space-y-3 lg:hidden">
+              {paginatedSales.map((sale) => (
+                <article key={sale.id} className="rounded-crm border border-white/10 bg-black/36 p-3" onClick={() => onOpenDetail(sale.id)}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-semibold text-white">{formatSaleCode(sale)}</span>
+                    <Pill label={saleStatusLabel(sale.status)} warning={sale.status !== "CONFIRMED"} />
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-zinc-400">
+                    <span className="truncate">{sale.customer}</span>
+                    <span className="text-right">{shortDate(sale.createdAt)}</span>
+                    <span className="truncate">{sale.items.map((item) => item.productName).join(", ") || "Sem produtos"}</span>
+                    <span className="text-right font-semibold text-white">{brl(sale.total)}</span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between">
+                    <span className="text-xs text-zinc-500">{sale.channel} · {sale.payment?.method ?? "Sem pgto"}</span>
+                    <div className="flex gap-1" onClick={(event) => event.stopPropagation()}>
+                      <IconButton label="WhatsApp" icon={MessageCircle} onClick={() => openWhatsapp(sale.customerWhatsapp)} disabled={!sale.customerWhatsapp} />
+                      <IconButton label="Copiar" icon={Copy} onClick={() => navigator.clipboard?.writeText(buildSaleSummary(sale))} />
+                      <IconButton label="Pagamentos" icon={CreditCard} onClick={() => onOpenPayments(sale)} />
+                    </div>
+                  </div>
+                </article>
+              ))}
+              <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+            </div>
+            {/* Desktop: table */}
+            <div className="hidden overflow-x-auto soft-scroll lg:block">
+              <table className="w-full min-w-[1060px] table-fixed text-left text-sm">
+                <colgroup>
+                  <col className="w-[7.5%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[15.5%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[11.5%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[7.5%]" />
+                  <col className="w-[8%]" />
+                </colgroup>
+                <thead className="text-xs uppercase tracking-[0.18em] text-zinc-500">
+                  <tr>
+                    <th className="px-2 py-3 first:pl-0">Venda</th>
+                    <th className="px-2 py-3">Data</th>
+                    <th className="px-2 py-3">Cliente</th>
+                    <th className="px-2 py-3">Produtos</th>
+                    <th className="px-2 py-3">Canal</th>
+                    <th className="px-2 py-3">Pagamento</th>
+                    <th className="px-2 py-3">Status</th>
+                    <th className="px-2 py-3">Total</th>
+                    <th className="px-2 py-3">Ticket</th>
+                    <th className="px-2 py-3">Ações</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            <Pagination page={page} totalPages={totalPages} onChange={setPage} />
-          </div>
+                </thead>
+                <tbody className="divide-y divide-white/8">
+                  {paginatedSales.map((sale) => (
+                    <tr key={sale.id} className="cursor-pointer text-zinc-300 transition hover:bg-white/[0.035]" onClick={() => onOpenDetail(sale.id)}>
+                      <td className="whitespace-nowrap px-2 py-4 first:pl-0 font-semibold text-white">{formatSaleCode(sale)}</td>
+                      <td className="whitespace-nowrap px-2 py-4">{shortDate(sale.createdAt)}</td>
+                      <td className="px-2 py-4"><div className="truncate">{sale.customer}</div></td>
+                      <td className="px-2 py-4"><div className="truncate">{sale.items.map((item) => item.productName).join(", ") || "Sem produtos"}</div></td>
+                      <td className="whitespace-nowrap px-2 py-4">{sale.channel}</td>
+                      <td className="px-2 py-4"><div className="truncate">{sale.payment ? `${sale.payment.method} · ${sale.payment.status}` : "Sem pagamento"}</div></td>
+                      <td className="overflow-hidden whitespace-nowrap px-2 py-4"><Pill label={saleStatusLabel(sale.status)} warning={sale.status !== "CONFIRMED"} /></td>
+                      <td className="whitespace-nowrap px-2 py-4 font-semibold text-white">{brl(sale.total)}</td>
+                      <td className="whitespace-nowrap px-2 py-4">{brl(sale.ticket)}</td>
+                      <td className="grid grid-cols-2 gap-1.5 px-2 py-3" onClick={(event) => event.stopPropagation()}>
+                        <IconButton label="Ver detalhes" icon={ClipboardList} onClick={() => onOpenDetail(sale.id)} />
+                        <IconButton label="Copiar resumo" icon={Copy} onClick={() => navigator.clipboard?.writeText(buildSaleSummary(sale))} />
+                        <IconButton label="Abrir WhatsApp" icon={MessageCircle} onClick={() => openWhatsapp(sale.customerWhatsapp)} disabled={!sale.customerWhatsapp} />
+                        <IconButton label="Criar pós-venda" icon={MessageCircle} onClick={() => onCreatePostSale(sale)} />
+                        <IconButton label="Ver pedido relacionado" icon={Package} disabled={!sale.order} onClick={() => onOpenOrder(sale)} />
+                        <IconButton label="Ir para Pagamentos" icon={CreditCard} onClick={() => onOpenPayments(sale)} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+            </div>
+          </>
         ) : null}
       </GlassPanel>
     </div>
@@ -3219,25 +3248,26 @@ function Sales({
 
 function SalesMetric({ label, value, detail }: Readonly<{ label: string; value: string; detail: string }>) {
   return (
-    <article className="glass-panel min-w-0 rounded-crm p-4">
-      <div className="flex items-start justify-between gap-3">
+    <article className="glass-panel min-w-0 rounded-crm p-3 sm:p-4">
+      <div className="flex items-start justify-between gap-2 sm:gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{label}</p>
-          <strong className="mt-3 block truncate text-2xl font-semibold leading-none text-white">{value}</strong>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500 sm:text-xs sm:tracking-[0.18em]">{label}</p>
+          <strong className="mt-2 block truncate text-lg font-semibold leading-none text-white sm:mt-3 sm:text-2xl">{value}</strong>
         </div>
-        <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-moss shadow-[0_0_18px_rgba(91,117,103,0.95)]" aria-hidden />
+        <span className="mt-1 hidden h-2 w-2 shrink-0 rounded-full bg-moss shadow-[0_0_18px_rgba(91,117,103,0.95)] sm:block" aria-hidden />
       </div>
-      <p className="mt-3 truncate text-xs font-medium text-moss">{detail}</p>
+      <p className="mt-2 truncate text-[10px] font-medium text-moss sm:mt-3 sm:text-xs">{detail}</p>
     </article>
   );
 }
 
 function SalesInsight({ label, value, detail }: Readonly<{ label: string; value: string; detail: string }>) {
+  // Mobile-optimized insight card
   return (
-    <div className="min-w-0 rounded-crm border border-white/10 bg-white/[0.035] px-3 py-3">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">{label}</p>
-      <strong className="mt-2 block truncate text-lg font-semibold text-white">{value}</strong>
-      <p className="mt-1 truncate text-xs text-moss">{detail}</p>
+    <div className="min-w-0 rounded-crm border border-white/10 bg-white/[0.035] px-2 py-2 sm:px-3 sm:py-3">
+      <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-zinc-500 sm:text-[11px] sm:tracking-[0.18em]">{label}</p>
+      <strong className="mt-1.5 block truncate text-sm font-semibold text-white sm:mt-2 sm:text-lg">{value}</strong>
+      <p className="mt-1 truncate text-[10px] text-moss sm:text-xs">{detail}</p>
     </div>
   );
 }
@@ -3438,11 +3468,11 @@ function Payments({
   const canceledCount = payments.filter((payment) => payment.status === "Cancelado").length;
 
   return (
-    <div className="space-y-5">
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Pendente" value={brl(pendingTotal)} hint={`${payments.filter((payment) => payment.status === "Pendente").length} pagamentos`} warning />
-        <Metric label="Confirmado" value={brl(confirmedTotal)} hint={`${payments.filter((payment) => payment.status === "Confirmado").length} pagamentos`} />
-        <Metric label="Estornado" value={brl(refundedTotal)} hint={`${payments.filter((payment) => payment.status === "Estornado").length} pagamentos`} warning />
+    <div className="space-y-4 lg:space-y-5">
+      <section className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
+        <Metric label="Pendente" value={brl(pendingTotal)} hint={`${payments.filter((payment) => payment.status === "Pendente").length} pgtos`} warning />
+        <Metric label="Confirmado" value={brl(confirmedTotal)} hint={`${payments.filter((payment) => payment.status === "Confirmado").length} pgtos`} />
+        <Metric label="Estornado" value={brl(refundedTotal)} hint={`${payments.filter((payment) => payment.status === "Estornado").length} pgtos`} warning />
         <Metric label="Cancelado" value={String(canceledCount)} hint="não entra na receita" warning />
       </section>
 
@@ -3475,7 +3505,34 @@ function Payments({
         </div>
 
         {filteredPayments.length === 0 ? <EmptyState message="Nenhum pagamento encontrado." icon={CreditCard} /> : null}
-        <div className="overflow-x-auto soft-scroll">
+
+        {/* Mobile: cards */}
+        {filteredPayments.length > 0 ? (
+          <div className="space-y-3 lg:hidden">
+            {paginatedPayments.map((payment) => (
+              <article key={payment.id} className="rounded-crm border border-white/10 bg-black/36 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <button className="text-sm font-semibold text-white hover:text-ember" onClick={() => onOpenSale(payment)}>{formatSaleCode(payment)}</button>
+                  <Pill label={payment.status} warning={payment.status !== "Confirmado"} />
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-zinc-400">
+                  <button className="truncate text-left hover:text-ember" onClick={() => onOpenCustomer(payment)}>{payment.customer}</button>
+                  <span className="text-right">{shortDate(payment.date)}</span>
+                  <span>{payment.method}</span>
+                  <span className="text-right font-semibold text-white">{brl(payment.amount)}</span>
+                </div>
+                <div className="mt-2 flex gap-1.5">
+                  <IconButton label="Confirmar" icon={CheckCircle2} onClick={() => onConfirm(payment)} disabled={payment.status !== "Pendente"} />
+                  <IconButton label="Estornar" icon={CreditCard} onClick={() => onRefund(payment)} disabled={payment.status !== "Confirmado"} />
+                  <IconButton label="Cancelar" icon={X} onClick={() => onCancel(payment)} disabled={payment.status !== "Pendente"} />
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : null}
+
+        {/* Desktop: table */}
+        <div className="hidden overflow-x-auto soft-scroll lg:block">
           {filteredPayments.length > 0 ? <table className="w-full min-w-[880px] text-left text-sm">
             <thead className="text-xs uppercase tracking-[0.18em] text-zinc-500">
               <tr>
@@ -3524,19 +3581,19 @@ function Finance({ finance }: Readonly<{ finance: FinanceData }>) {
   const revenueSeries = finance.revenue.length ? finance.revenue : [{ day: "01", value: 0 }];
 
   return (
-    <div className="space-y-5">
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
-        <FinanceMetric label="Faturamento" value={brl(finance.summary.revenue)} hint="pagamentos confirmados" />
-        <FinanceMetric label="Custo estimado" value={brl(finance.summary.estimatedCost)} hint="itens vendidos" warning />
-        <FinanceMetric label="Lucro estimado" value={brl(finance.summary.estimatedProfit)} hint="total menos custo" />
-        <FinanceMetric label="Margem estimada" value={`${finance.summary.estimatedMargin.toFixed(2)}%`} hint="sobre vendas confirmadas" />
-        <FinanceMetric label="Pendências" value={brl(finance.summary.pendingPayments)} hint="pagamentos pendentes" warning />
-        <FinanceMetric label="Ticket médio" value={brl(finance.summary.averageTicket)} hint="vendas confirmadas" />
+    <div className="space-y-4 lg:space-y-5">
+      <section className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 xl:grid-cols-4 2xl:grid-cols-7">
+        <FinanceMetric label="Faturamento" value={brl(finance.summary.revenue)} hint="confirmados" />
+        <FinanceMetric label="Custo" value={brl(finance.summary.estimatedCost)} hint="itens vendidos" warning />
+        <FinanceMetric label="Lucro" value={brl(finance.summary.estimatedProfit)} hint="total - custo" />
+        <FinanceMetric label="Margem" value={`${finance.summary.estimatedMargin.toFixed(1)}%`} hint="confirmadas" />
+        <FinanceMetric label="Pendências" value={brl(finance.summary.pendingPayments)} hint="pendentes" warning />
+        <FinanceMetric label="Ticket médio" value={brl(finance.summary.averageTicket)} hint="confirmadas" />
         <FinanceMetric label="Reembolsos" value={brl(finance.summary.refunds)} hint="manual" warning />
       </section>
       <section className="grid gap-5 xl:grid-cols-[1.25fr_0.75fr]">
         <GlassPanel title="Receita por dia">
-          <div className="h-80">
+          <div className="h-52 sm:h-80">
             {mounted ? (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={revenueSeries} margin={{ top: 12, right: 12, left: -18, bottom: 0 }}>
@@ -3785,9 +3842,9 @@ function SettingsPanel({
 
 function GlassPanel({ title, badge, actions, children }: Readonly<{ title: string; badge?: string; actions?: React.ReactNode; children: React.ReactNode }>) {
   return (
-    <section className="glass-panel min-w-0 rounded-crm p-4">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="flex items-center gap-2 text-base font-semibold text-white">
+    <section className="glass-panel min-w-0 rounded-crm p-3 sm:p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 sm:mb-4 sm:gap-3">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-white sm:text-base">
           {title}
           {badge ? <Pill label={badge} /> : null}
         </h2>
@@ -3800,25 +3857,25 @@ function GlassPanel({ title, badge, actions, children }: Readonly<{ title: strin
 
 function Metric({ label, value, hint, warning = false }: Readonly<{ label: string; value: string; hint: string; warning?: boolean }>) {
   return (
-    <article className="glass-panel min-w-0 rounded-crm p-4">
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{label}</p>
-      <div className="mt-3 flex items-end justify-between gap-3">
-        <strong className="text-2xl font-semibold text-white">{value}</strong>
-        <Gauge className={`h-5 w-5 ${warning ? "text-ember" : "text-moss"}`} aria-hidden />
+    <article className="glass-panel min-w-0 rounded-crm p-3 sm:p-4">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500 sm:text-xs sm:tracking-[0.18em]">{label}</p>
+      <div className="mt-2 flex items-end justify-between gap-2 sm:mt-3 sm:gap-3">
+        <strong className="truncate text-lg font-semibold text-white sm:text-2xl">{value}</strong>
+        <Gauge className={`hidden h-5 w-5 sm:block ${warning ? "text-ember" : "text-moss"}`} aria-hidden />
       </div>
-      <p className={`mt-2 text-xs ${warning ? "text-ember" : "text-moss"}`}>{hint}</p>
+      <p className={`mt-1.5 truncate text-[10px] sm:mt-2 sm:text-xs ${warning ? "text-ember" : "text-moss"}`}>{hint}</p>
     </article>
   );
 }
 
 function FinanceMetric({ label, value, hint, warning = false }: Readonly<{ label: string; value: string; hint: string; warning?: boolean }>) {
   return (
-    <article className="glass-panel min-w-0 rounded-crm p-4">
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{label}</p>
-      <strong className="mt-3 block min-h-8 truncate text-2xl font-semibold leading-none text-white">{value}</strong>
-      <div className="mt-3 flex items-center justify-between gap-3">
-        <p className={`truncate text-xs ${warning ? "text-ember" : "text-moss"}`}>{hint}</p>
-        <Gauge className={`h-4 w-4 shrink-0 ${warning ? "text-ember" : "text-moss"}`} aria-hidden />
+    <article className="glass-panel min-w-0 rounded-crm p-3 sm:p-4">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500 sm:text-xs sm:tracking-[0.18em]">{label}</p>
+      <strong className="mt-2 block truncate text-base font-semibold leading-none text-white sm:mt-3 sm:min-h-8 sm:text-2xl">{value}</strong>
+      <div className="mt-2 flex items-center justify-between gap-2 sm:mt-3 sm:gap-3">
+        <p className={`truncate text-[10px] sm:text-xs ${warning ? "text-ember" : "text-moss"}`}>{hint}</p>
+        <Gauge className={`hidden h-4 w-4 shrink-0 sm:block ${warning ? "text-ember" : "text-moss"}`} aria-hidden />
       </div>
     </article>
   );
@@ -4293,4 +4350,63 @@ function formatOrderCode(order: Pick<Order, "orderNumber" | "id"> | NonNullable<
 
 function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function MobileBottomNav({ pathname }: Readonly<{ pathname: string }>) {
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-50 flex items-end justify-center lg:hidden">
+      {/* Backdrop blur container */}
+      <div className="mx-3 mb-3 flex w-full max-w-md items-end justify-between rounded-2xl border border-white/10 bg-[rgba(12,14,16,0.92)] px-3 py-2 shadow-glass backdrop-blur-2xl">
+        {mobileNavItems.map((item) => {
+          const Icon = item.icon;
+          const active = pathname === item.href;
+
+          if (item.center) {
+            return (
+              <Link
+                key={item.key}
+                href={item.href}
+                className="group relative -mt-5 flex flex-col items-center"
+              >
+                {/* Glow effect */}
+                <div className={`absolute -inset-1 rounded-full transition-opacity duration-300 ${
+                  active ? "opacity-100" : "opacity-0 group-hover:opacity-60"
+                }`} style={{ background: "radial-gradient(circle, rgba(91,117,103,0.55) 0%, transparent 70%)" }} />
+                {/* Center circle */}
+                <div className={`relative flex h-14 w-14 items-center justify-center rounded-full border transition-all duration-300 ${
+                  active
+                    ? "border-moss/50 bg-gradient-to-br from-moss/40 to-moss/20 shadow-[0_0_24px_rgba(91,117,103,0.4)]"
+                    : "border-white/15 bg-gradient-to-br from-white/10 to-white/[0.04] group-hover:border-moss/30 group-hover:shadow-[0_0_16px_rgba(91,117,103,0.25)]"
+                }`}>
+                  <Icon className={`h-6 w-6 transition-colors duration-300 ${
+                    active ? "text-white" : "text-zinc-300 group-hover:text-white"
+                  }`} aria-hidden />
+                </div>
+                <span className={`mt-1 text-[10px] font-semibold transition-colors duration-300 ${
+                  active ? "text-moss" : "text-zinc-500 group-hover:text-zinc-300"
+                }`}>{item.label}</span>
+              </Link>
+            );
+          }
+
+          return (
+            <Link
+              key={item.key}
+              href={item.href}
+              className="group flex flex-col items-center gap-1 px-2 py-1"
+            >
+              <Icon className={`h-5 w-5 transition-colors duration-200 ${
+                active ? "text-white" : "text-zinc-500 group-hover:text-zinc-300"
+              }`} aria-hidden />
+              <span className={`text-[10px] font-semibold transition-colors duration-200 ${
+                active ? "text-white" : "text-zinc-500 group-hover:text-zinc-300"
+              }`}>{item.label}</span>
+              {/* Active indicator dot */}
+              {active ? <div className="h-1 w-1 rounded-full bg-ember" /> : null}
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
+  );
 }

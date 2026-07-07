@@ -18,6 +18,7 @@ const productSelect = {
   colors: true,
   sizes: true,
   active: true,
+  available: true,
   sku: true,
   description: true
 } satisfies Prisma.ProductSelect;

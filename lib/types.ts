@@ -107,6 +107,7 @@ export type Product = {
   colors: string[];
   sizes: string[];
   active: boolean;
+  available: boolean;
   sku?: string | null;
   description: string;
 };

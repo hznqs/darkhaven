@@ -68,6 +68,7 @@ type ProductRecord = {
   colors: string[];
   sizes: string[];
   active: boolean;
+  available: boolean;
   sku: string | null;
   description: string | null;
 };
@@ -190,6 +191,7 @@ export function serializeProduct(product: ProductRecord): Product {
     colors: product.colors,
     sizes: product.sizes,
     active: product.active,
+    available: product.available,
     sku: product.sku,
     description: product.description ?? ""
   };

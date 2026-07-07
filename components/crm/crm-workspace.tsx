@@ -1074,6 +1074,7 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
       colors: getString(form, "colors"),
       sizes: getString(form, "sizes"),
       active: true,
+      available: getString(form, "available") === "true",
       description: getString(form, "description")
     }, editingProduct ? "Produto atualizado com sucesso." : "Produto criado com sucesso.", editingProduct ? "PATCH" : "POST", "products");
   }
@@ -1771,6 +1772,7 @@ function ActionModal({
           />
           <FormInput label="Preço" name="price" required mask="currency" defaultValue={editingProduct ? formatCurrencyBR(editingProduct.price) : undefined} />
           <FormInput label="Custo" name="cost" defaultValue={editingProduct ? formatCurrencyBR(editingProduct.cost) : "R$ 0,00"} mask="currency" />
+          <FormSelect label="Disponibilidade" name="available" required defaultValue={isEditing && editingProduct ? String(editingProduct.available) : "true"} options={[["true", "Em estoque"], ["false", "Esgotado"]]} />
           <FormInput label="Cores" name="colors" placeholder="Preto, Branco, Cinza" maxLength={240} defaultValue={editingProduct?.colors.join(", ")} />
           <FormInput label="Tamanhos" name="sizes" placeholder="P, M, G, GG" maxLength={240} defaultValue={editingProduct?.sizes.join(", ")} />
           <FormTextArea label="Descrição" name="description" maxLength={600} defaultValue={editingProduct?.description} />
@@ -1782,7 +1784,7 @@ function ActionModal({
 
   if (activeModal === "sale") {
     const selectedSaleCustomer = saleCustomerId ? customers.find((customer) => customer.id === saleCustomerId) ?? null : null;
-    const activeProducts = products.filter((product) => product.active);
+    const activeProducts = products.filter((product) => product.active && product.available);
     const canSubmit = customers.length > 0 && activeProducts.length > 0 && (!saleCustomerId || Boolean(selectedSaleCustomer));
     return (
       <ModalFrame title="Nova venda" onClose={onClose}>
@@ -2174,11 +2176,13 @@ function FormInput({
   autoComplete,
   autoCapitalize
 }: Readonly<{ label: string; name: string; type?: string; required?: boolean; placeholder?: string; defaultValue?: string; min?: string; max?: string; step?: string; minLength?: number; maxLength?: number; pattern?: string; title?: string; mask?: "phone" | "currency" | "cnpj"; onValueChange?: (value: string) => void; autoComplete?: string; autoCapitalize?: string }>) {
+  const isDate = type === "date";
+
   return (
     <label className="block space-y-2 text-sm text-zinc-300">
       <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">{label}</span>
       <input
-        className="w-full rounded-crm border border-white/10 bg-white/[0.04] px-3 py-3 text-white outline-none focus:border-ember/60"
+        className={isDate ? "w-full rounded-crm border border-white/10 bg-white/[0.04] px-3 py-3 text-white outline-none focus:border-ember/60 min-h-[50px] md:min-h-0 text-base md:text-sm [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:scale-150 [&::-webkit-calendar-picker-indicator]:md:scale-100 [&::-webkit-calendar-picker-indicator]:opacity-70 [&::-webkit-calendar-picker-indicator]:hover:opacity-100 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-date-and-time-value]:text-left" : "w-full rounded-crm border border-white/10 bg-white/[0.04] px-3 py-3 text-white outline-none focus:border-ember/60"}
         name={name}
         type={mask ? "text" : type}
         required={required}
@@ -2276,18 +2280,23 @@ function FormSelect({ label, name, options, required = false, defaultValue, valu
   return (
     <label className="block space-y-2 text-sm text-zinc-300">
       <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">{label}</span>
-      <select
-        className="w-full rounded-crm border border-white/10 bg-black/70 px-3 py-3 text-white outline-none focus:border-ember/60 disabled:cursor-not-allowed disabled:opacity-50"
-        name={name}
-        required={required}
-        defaultValue={value === undefined ? defaultValue : undefined}
-        value={value}
-        onChange={(event) => onValueChange?.(event.target.value)}
-        disabled={disabled}
-      >
-        <option value="">{placeholder ?? (required ? "Selecione" : "Nenhum")}</option>
-        {options.map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}
-      </select>
+      <div className="relative">
+        <select
+          className="w-full appearance-none rounded-crm border border-white/10 bg-black/70 px-3 py-3 pr-10 text-white outline-none transition hover:border-white/20 focus:border-ember/60 focus:shadow-[0_0_0_3px_rgba(216,177,93,0.08)] disabled:cursor-not-allowed disabled:opacity-50 min-h-[50px] md:min-h-0 text-base md:text-sm sm:py-2.5"
+          name={name}
+          required={required}
+          defaultValue={value === undefined ? defaultValue : undefined}
+          value={value}
+          onChange={(event) => onValueChange?.(event.target.value)}
+          disabled={disabled}
+        >
+          <option value="">{placeholder ?? (required ? "Selecione" : "Nenhum")}</option>
+          {options.map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}
+        </select>
+        <svg className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </div>
     </label>
   );
 }
@@ -2301,19 +2310,24 @@ function PaymentSalePicker({ sales }: Readonly<{ sales: SaleSummary[] }>) {
     <div className="space-y-3">
       <label className="block space-y-2 text-sm text-zinc-300">
         <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">Venda</span>
-        <select
-          className="w-full rounded-crm border border-white/10 bg-black/70 px-3 py-3 text-white outline-none focus:border-ember/60"
-          name="saleId"
-          required
-          value={effectiveSelectedSaleId}
-          onChange={(event) => setSelectedSaleId(event.target.value)}
-        >
-          {sales.map((sale) => (
-            <option key={sale.id} value={sale.id}>
-              {formatSaleCode(sale)} - {sale.customer} - {brl(sale.total)}
-            </option>
-          ))}
-        </select>
+        <div className="relative">
+          <select
+            className="w-full appearance-none rounded-crm border border-white/10 bg-black/70 px-3 py-3 pr-10 text-white outline-none transition hover:border-white/20 focus:border-ember/60 focus:shadow-[0_0_0_3px_rgba(216,177,93,0.08)] min-h-[50px] md:min-h-0 text-base md:text-sm sm:py-2.5"
+            name="saleId"
+            required
+            value={effectiveSelectedSaleId}
+            onChange={(event) => setSelectedSaleId(event.target.value)}
+          >
+            {sales.map((sale) => (
+              <option key={sale.id} value={sale.id}>
+                {formatSaleCode(sale)} - {sale.customer} - {brl(sale.total)}
+              </option>
+            ))}
+          </select>
+          <svg className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
       </label>
       <div className="rounded-crm border border-white/10 bg-white/[0.04] p-3">
         <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">Valor do pagamento</p>
@@ -2508,19 +2522,29 @@ function SaleCartFields({
               {hasColors ? (
                 <label className="block space-y-2 text-sm text-zinc-300">
                   <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">Cor</span>
-                  <select className="w-full rounded-crm border border-white/10 bg-black/70 px-3 py-3 text-white outline-none focus:border-ember/60" value={item.selectedColor} onChange={(event) => onChange(item.id, { selectedColor: event.target.value })}>
-                    <option value="">Selecione</option>
-                    {product?.colors.map((color) => <option key={color} value={color}>{color}</option>)}
-                  </select>
+                  <div className="relative">
+                    <select className="w-full appearance-none rounded-crm border border-white/10 bg-black/70 px-3 py-3 pr-10 text-white outline-none transition hover:border-white/20 focus:border-ember/60 focus:shadow-[0_0_0_3px_rgba(216,177,93,0.08)] min-h-[50px] md:min-h-0 text-base md:text-sm sm:py-2.5" value={item.selectedColor} onChange={(event) => onChange(item.id, { selectedColor: event.target.value })}>
+                      <option value="">Selecione</option>
+                      {product?.colors.map((color) => <option key={color} value={color}>{color}</option>)}
+                    </select>
+                    <svg className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
                 </label>
               ) : null}
               {hasSizes ? (
                 <label className="block space-y-2 text-sm text-zinc-300">
                   <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">Tamanho</span>
-                  <select className="w-full rounded-crm border border-white/10 bg-black/70 px-3 py-3 text-white outline-none focus:border-ember/60" value={item.selectedSize} onChange={(event) => onChange(item.id, { selectedSize: event.target.value })}>
-                    <option value="">Selecione</option>
-                    {product?.sizes.map((size) => <option key={size} value={size}>{size}</option>)}
-                  </select>
+                  <div className="relative">
+                    <select className="w-full appearance-none rounded-crm border border-white/10 bg-black/70 px-3 py-3 pr-10 text-white outline-none transition hover:border-white/20 focus:border-ember/60 focus:shadow-[0_0_0_3px_rgba(216,177,93,0.08)] min-h-[50px] md:min-h-0 text-base md:text-sm sm:py-2.5" value={item.selectedSize} onChange={(event) => onChange(item.id, { selectedSize: event.target.value })}>
+                      <option value="">Selecione</option>
+                      {product?.sizes.map((size) => <option key={size} value={size}>{size}</option>)}
+                    </select>
+                    <svg className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
                 </label>
               ) : null}
               <label className="block space-y-2 text-sm text-zinc-300">
@@ -2542,15 +2566,20 @@ function SaleCartFields({
       <div className="grid gap-3 rounded-crm border border-white/10 bg-white/[0.025] p-3 sm:grid-cols-[0.75fr_1fr]">
         <label className="block space-y-2 text-sm text-zinc-300">
           <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">Tipo de desconto</span>
-          <select
-            className="w-full rounded-crm border border-white/10 bg-black/70 px-3 py-3 text-white outline-none focus:border-ember/60"
-            name="discountMode"
-            value={saleDiscountMode}
-            onChange={(event) => onDiscountModeChange(event.target.value as SaleDiscountMode)}
-          >
-            <option value="AMOUNT">Valor em R$</option>
-            <option value="PERCENTAGE">Porcentagem</option>
-          </select>
+          <div className="relative">
+            <select
+              className="w-full appearance-none rounded-crm border border-white/10 bg-black/70 px-3 py-3 pr-10 text-white outline-none transition hover:border-white/20 focus:border-ember/60 focus:shadow-[0_0_0_3px_rgba(216,177,93,0.08)] min-h-[50px] md:min-h-0 text-base md:text-sm sm:py-2.5"
+              name="discountMode"
+              value={saleDiscountMode}
+              onChange={(event) => onDiscountModeChange(event.target.value as SaleDiscountMode)}
+            >
+              <option value="AMOUNT">Valor em R$</option>
+              <option value="PERCENTAGE">Porcentagem</option>
+            </select>
+            <svg className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
         </label>
         {saleDiscountMode === "PERCENTAGE" ? (
           <label className="block space-y-2 text-sm text-zinc-300">
@@ -2679,7 +2708,7 @@ function Dashboard({ dashboard }: Readonly<{ dashboard: DashboardData }>) {
 
         <GlassPanel title="Vendas por canal">
           <div className="grid min-h-48 place-items-center gap-4 sm:min-h-72 sm:grid-cols-[1fr_1fr] xl:grid-cols-1">
-            <div className="h-32 w-full sm:h-44">
+            <div className="h-44 w-full sm:h-48">
               {mounted ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
@@ -3015,7 +3044,7 @@ function Products({ products, onEdit }: Readonly<{ products: Product[]; onEdit: 
                   <h3 className="truncate text-sm font-semibold text-white sm:text-base">{product.name}</h3>
                   <p className="text-[10px] text-zinc-500 sm:text-xs">{product.category}</p>
                 </div>
-                <Pill label="Ativo" />
+                {product.available ? <Pill label="Ativo" /> : <Pill label="Esgotado" className="border-red-500/35 bg-red-500/10 text-red-300" />}
               </div>
               <p className="hidden text-xs leading-5 text-zinc-400 sm:block sm:min-h-10">{product.description}</p>
               <div className="flex items-end justify-between">
@@ -3105,40 +3134,65 @@ function Sales({
               onChange={(event) => updateFilter({ search: event.target.value })}
             />
           </label>
-          <select className="rounded-crm border border-white/10 bg-black/60 px-3 py-2 text-sm text-white" value={filters.range} onChange={(event) => updateFilter({ ...rangeToDates(event.target.value as SalesFilters["range"]), range: event.target.value as SalesFilters["range"] })}>
-            <option value="today">Hoje</option>
-            <option value="yesterday">Ontem</option>
-            <option value="7d">Últimos 7 dias</option>
-            <option value="30d">Últimos 30 dias</option>
-            <option value="month">Este mês</option>
-            <option value="lastMonth">Mês passado</option>
-            <option value="custom">Personalizado</option>
-          </select>
-          <select className="rounded-crm border border-white/10 bg-black/60 px-3 py-2 text-sm text-white" value={filters.status} onChange={(event) => updateFilter({ status: event.target.value })}>
-            <option value="">Status</option>
-            <option value="WAITING_PAYMENT">Aguardando pagamento</option>
-            <option value="CONFIRMED">Confirmada</option>
-            <option value="CANCELED">Cancelada</option>
-          </select>
-          <select className="rounded-crm border border-white/10 bg-black/60 px-3 py-2 text-sm text-white" value={filters.channel} onChange={(event) => updateFilter({ channel: event.target.value })}>
-            <option value="">Canal</option>
-            <option value="WhatsApp">WhatsApp</option>
-            <option value="Instagram">Instagram</option>
-            <option value="Site">Site</option>
-            <option value="Loja Física">Loja Física</option>
-          </select>
+          <div className="relative">
+            <select className="w-full appearance-none rounded-crm border border-white/10 bg-black/60 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm" value={filters.range} onChange={(event) => updateFilter({ ...rangeToDates(event.target.value as SalesFilters["range"]), range: event.target.value as SalesFilters["range"] })}>
+              <option value="today">Hoje</option>
+              <option value="yesterday">Ontem</option>
+              <option value="7d">Últimos 7 dias</option>
+              <option value="30d">Últimos 30 dias</option>
+              <option value="month">Este mês</option>
+              <option value="lastMonth">Mês passado</option>
+              <option value="custom">Personalizado</option>
+            </select>
+            <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+          <div className="relative">
+            <select className="w-full appearance-none rounded-crm border border-white/10 bg-black/60 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm" value={filters.status} onChange={(event) => updateFilter({ status: event.target.value })}>
+              <option value="">Status</option>
+              <option value="WAITING_PAYMENT">Aguardando pagamento</option>
+              <option value="CONFIRMED">Confirmada</option>
+              <option value="CANCELED">Cancelada</option>
+            </select>
+            <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+          <div className="relative">
+            <select className="w-full appearance-none rounded-crm border border-white/10 bg-black/60 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm" value={filters.channel} onChange={(event) => updateFilter({ channel: event.target.value })}>
+              <option value="">Canal</option>
+              <option value="WhatsApp">WhatsApp</option>
+              <option value="Instagram">Instagram</option>
+              <option value="Site">Site</option>
+              <option value="Loja Física">Loja Física</option>
+            </select>
+            <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
         </div>
         <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <FormInput label="Data inicial" name="salesStartDate" type="date" defaultValue={filters.startDate} onValueChange={(value) => updateFilter({ range: "custom", startDate: value })} />
           <FormInput label="Data final" name="salesEndDate" type="date" defaultValue={filters.endDate} onValueChange={(value) => updateFilter({ range: "custom", endDate: value })} />
-          <select className="rounded-crm border border-white/10 bg-black/60 px-3 py-2 text-sm text-white" value={filters.customerId} onChange={(event) => updateFilter({ customerId: event.target.value })}>
-            <option value="">Cliente</option>
-            {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
-          </select>
-          <select className="rounded-crm border border-white/10 bg-black/60 px-3 py-2 text-sm text-white" value={filters.productId} onChange={(event) => updateFilter({ productId: event.target.value })}>
-            <option value="">Produto</option>
-            {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
-          </select>
+          <div className="relative">
+            <select className="w-full appearance-none rounded-crm border border-white/10 bg-black/60 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm" value={filters.customerId} onChange={(event) => updateFilter({ customerId: event.target.value })}>
+              <option value="">Cliente</option>
+              {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
+            </select>
+            <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+          <div className="relative">
+            <select className="w-full appearance-none rounded-crm border border-white/10 bg-black/60 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm" value={filters.productId} onChange={(event) => updateFilter({ productId: event.target.value })}>
+              <option value="">Produto</option>
+              {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
+            </select>
+            <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
         </div>
       </GlassPanel>
 
@@ -3537,20 +3591,30 @@ function Payments({
               onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
             />
           </label>
-          <select className="rounded-crm border border-white/10 bg-black/60 px-3 py-2 text-sm text-white" value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}>
-            <option value="">Todos os status</option>
-            <option value="Pendente">Pendente</option>
-            <option value="Confirmado">Confirmado</option>
-            <option value="Estornado">Estornado</option>
-            <option value="Cancelado">Cancelado</option>
-          </select>
-          <select className="rounded-crm border border-white/10 bg-black/60 px-3 py-2 text-sm text-white" value={filters.method} onChange={(event) => setFilters((current) => ({ ...current, method: event.target.value }))}>
-            <option value="">Todas as formas</option>
-            <option value="Pix">Pix</option>
-            <option value="Cartão">Cartão</option>
-            <option value="Boleto">Boleto</option>
-            <option value="Dinheiro">Dinheiro</option>
-          </select>
+          <div className="relative">
+            <select className="w-full appearance-none rounded-crm border border-white/10 bg-black/60 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm" value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}>
+              <option value="">Todos os status</option>
+              <option value="Pendente">Pendente</option>
+              <option value="Confirmado">Confirmado</option>
+              <option value="Estornado">Estornado</option>
+              <option value="Cancelado">Cancelado</option>
+            </select>
+            <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+          <div className="relative">
+            <select className="w-full appearance-none rounded-crm border border-white/10 bg-black/60 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm" value={filters.method} onChange={(event) => setFilters((current) => ({ ...current, method: event.target.value }))}>
+              <option value="">Todas as formas</option>
+              <option value="Pix">Pix</option>
+              <option value="Cartão">Cartão</option>
+              <option value="Boleto">Boleto</option>
+              <option value="Dinheiro">Dinheiro</option>
+            </select>
+            <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
         </div>
 
         {filteredPayments.length === 0 ? <EmptyState message="Nenhum pagamento encontrado." icon={CreditCard} /> : null}
@@ -3713,18 +3777,33 @@ function PostSales({ postSales, onResolve, onCreate }: Readonly<{ postSales: Pos
         title="Atendimentos"
         actions={
           <div className="flex flex-wrap gap-2">
-            <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as PostSaleType | "ALL")} className="rounded-crm border border-white/10 bg-black/50 px-3 py-2 text-sm text-white">
-              <option value="ALL">Todos os tipos</option>
-              {Object.entries(postSaleTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as PostSaleStatus | "ALL")} className="rounded-crm border border-white/10 bg-black/50 px-3 py-2 text-sm text-white">
-              <option value="ALL">Todos os status</option>
-              {Object.entries(postSaleStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
-            <select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value as Priority | "ALL")} className="rounded-crm border border-white/10 bg-black/50 px-3 py-2 text-sm text-white">
-              <option value="ALL">Todas as prioridades</option>
-              {Object.entries(priorityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
+            <div className="relative">
+              <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as PostSaleType | "ALL")} className="appearance-none rounded-crm border border-white/10 bg-black/50 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm">
+                <option value="ALL">Todos os tipos</option>
+                {Object.entries(postSaleTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+              <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+            <div className="relative">
+              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as PostSaleStatus | "ALL")} className="appearance-none rounded-crm border border-white/10 bg-black/50 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm">
+                <option value="ALL">Todos os status</option>
+                {Object.entries(postSaleStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+              <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+            <div className="relative">
+              <select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value as Priority | "ALL")} className="appearance-none rounded-crm border border-white/10 bg-black/50 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm">
+                <option value="ALL">Todas as prioridades</option>
+                {Object.entries(priorityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+              <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
           </div>
         }
       >

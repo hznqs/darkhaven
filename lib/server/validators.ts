@@ -122,6 +122,7 @@ export const productSchema = z.object({
   colors: optionListSchema.default([]),
   sizes: optionListSchema.default([]),
   active: z.boolean().default(true),
+  available: z.boolean().default(true),
   description: z.string().trim().max(600).optional()
 });
 

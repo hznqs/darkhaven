@@ -154,6 +154,7 @@ model Product {
   colors      String[]    @default([])
   sizes       String[]    @default([])
   active      Boolean     @default(true)
+  available   Boolean     @default(true)
   description String?
   saleItems   SaleItem[]
   orderItems  OrderItem[]

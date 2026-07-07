@@ -36,7 +36,7 @@ const signatures: Record<string, { extension: string; matches: (bytes: Uint8Arra
 };
 
 export async function POST(request: NextRequest) {
-  const admin = requireAdmin(request);
+  const admin = await requireAdmin(request);
   if (!admin.ok) return NextResponse.json({ error: admin.message }, { status: admin.status });
 
   try {

@@ -4,14 +4,14 @@ import { writeAuditLogSafe } from "@/lib/server/audit";
 import { requireAdmin, requireAuth } from "@/lib/server/security";
 import { serializeSaleDetail } from "@/lib/server/sales";
 import { readWithRetry } from "@/lib/server/read-retry";
-import { parseJsonBody } from "@/lib/server/errors";
+import { parseJsonBody, safeErrorResponse, warnInDevelopment } from "@/lib/server/errors";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
 export async function GET(request: NextRequest, context: RouteContext) {
-  const auth = requireAuth(request);
+  const auth = await requireAuth(request);
   if (!auth.ok) return NextResponse.json({ error: auth.message }, { status: auth.status });
 
   const { id } = await context.params;
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 }
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
-  const admin = requireAdmin(request);
+  const admin = await requireAdmin(request);
   if (!admin.ok) return NextResponse.json({ error: admin.message }, { status: admin.status });
 
   const { id } = await context.params;
@@ -41,6 +41,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (!body.ok) return body.response;
 
   if (body.data.action !== "cancel") return NextResponse.json({ error: "Ação não suportada." }, { status: 422 });
+
+  const reason = body.data.reason?.trim().slice(0, 300) || "";
+  if (reason && reason.length < 5) {
+    return NextResponse.json({ error: "O motivo precisa ter ao menos 5 caracteres." }, { status: 422 });
+  }
 
   try {
     const sale = await prisma.sale.findUnique({
@@ -61,7 +66,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           payments: {
             updateMany: {
               where: { status: "PENDING" },
-              data: { status: "CANCELED", reason: body.data.reason?.slice(0, 300) ?? "Venda cancelada." }
+              data: { status: "CANCELED", reason: reason || "Venda cancelada." }
             }
           }
         },
@@ -81,11 +86,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       action: "UPDATE",
       entity: "Sale",
       entityId: id,
-      metadata: { canceled: true, reason: body.data.reason?.slice(0, 300) }
+      metadata: { canceled: true, reason: reason || null }
     });
 
     return NextResponse.json({ data: serializeSaleDetail(updated) });
   } catch (error) {
-    return NextResponse.json({ error: "Não foi possível cancelar a venda." }, { status: 500 });
+    warnInDevelopment("Sale cancel failed", error);
+    return safeErrorResponse("Não foi possível cancelar a venda.");
   }
 }

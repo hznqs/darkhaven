@@ -29,7 +29,16 @@ function requireEnv(name) {
 async function main() {
   const email = requireEnv("ADMIN_EMAIL").trim().toLowerCase();
   const password = requireEnv("ADMIN_PASSWORD");
-  if (password.length < 8) throw new Error("ADMIN_PASSWORD must have at least 8 characters");
+
+  const weakPatterns = ["change-me", "before-production", "admin", "password", "senha", "123456"];
+  const passwordLower = password.toLowerCase();
+  if (weakPatterns.some((p) => passwordLower.includes(p))) {
+    throw new Error("ADMIN_PASSWORD is too weak. Avoid common words like 'change-me', 'admin', 'password'.");
+  }
+  if (password.length < 12) throw new Error("ADMIN_PASSWORD must have at least 12 characters");
+  if (!/[A-Z]/.test(password)) throw new Error("ADMIN_PASSWORD must contain at least one uppercase letter");
+  if (!/[a-z]/.test(password)) throw new Error("ADMIN_PASSWORD must contain at least one lowercase letter");
+  if (!/[0-9]/.test(password)) throw new Error("ADMIN_PASSWORD must contain at least one number");
 
   const existingOwner = await prisma.user.findFirst({ where: { isOwnerAdmin: true } });
   if (existingOwner) {

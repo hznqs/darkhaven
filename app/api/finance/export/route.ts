@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/server/prisma";
 import { requireAuth } from "@/lib/server/security";
+import { safeErrorResponse, warnInDevelopment } from "@/lib/server/errors";
+import { businessDateToUtcStart, businessDateToUtcEnd } from "@/lib/server/sales";
 
 function brlCents(value: number) {
   return (value / 100).toLocaleString("pt-BR", {
@@ -44,18 +46,24 @@ const statusLabels: Record<string, string> = {
 };
 
 export async function GET(request: NextRequest) {
-  const auth = requireAuth(request);
+  const auth = await requireAuth(request);
   if (!auth.ok) return NextResponse.json({ error: auth.message }, { status: auth.status });
 
   const { searchParams } = new URL(request.url);
   const startDate = searchParams.get("startDate");
   const endDate = searchParams.get("endDate");
 
-  const where: Record<string, unknown> = { status: { not: "CANCELED" } };
+  const where: Record<string, unknown> = { status: "CONFIRMED" };
   if (startDate || endDate) {
     const dateFilter: Record<string, Date> = {};
-    if (startDate) dateFilter.gte = new Date(`${startDate}T00:00:00`);
-    if (endDate) dateFilter.lte = new Date(`${endDate}T23:59:59`);
+    if (startDate) {
+      const [y, m, d] = startDate.split("-").map(Number);
+      if (y && m && d) dateFilter.gte = businessDateToUtcStart(y, m, d);
+    }
+    if (endDate) {
+      const [y, m, d] = endDate.split("-").map(Number);
+      if (y && m && d) dateFilter.lte = businessDateToUtcEnd(y, m, d);
+    }
     where.createdAt = dateFilter;
   }
 
@@ -128,7 +136,7 @@ export async function GET(request: NextRequest) {
         brl(Number(sale.total)),
         brl(Number(sale.estimatedCost)),
         brl(Number(sale.estimatedProfit)),
-        Number(sale.estimatedMargin).toFixed(2),
+        (Number(sale.estimatedMargin) * 100).toFixed(2),
         payment ? methodLabels[payment.method] ?? payment.method : "Sem pagamento",
         payment?.status ?? "",
         payment?.paidAt ? payment.paidAt.toLocaleDateString("pt-BR") : "",
@@ -148,7 +156,7 @@ export async function GET(request: NextRequest) {
       }
     });
   } catch (error) {
-    console.error("[Finance Export GET]", error);
-    return NextResponse.json({ error: "Erro ao gerar exportação financeira." }, { status: 500 });
+    warnInDevelopment("Finance Export GET", error);
+    return safeErrorResponse("Erro ao gerar exportação financeira.");
   }
 }

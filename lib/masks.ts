@@ -13,7 +13,6 @@ export function formatPhoneBR(value: string) {
 export function parseCurrencyBR(value: string) {
   const digits = value.replace(/\D/g, "");
   if (!digits) return 0;
-  if (digits.length <= 2) return Number(digits);
   return Number(digits) / 100;
 }
 

@@ -11,7 +11,7 @@ type RouteContext = {
 };
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
-  const admin = requireAdmin(request);
+  const admin = await requireAdmin(request);
   if (!admin.ok) return NextResponse.json({ error: admin.message }, { status: admin.status });
 
   const body = await parseJsonBody(request);
@@ -29,7 +29,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       });
 
       if (!current) throw new Error("PAYMENT_NOT_FOUND");
-      if (current.status === "REFUNDED" || current.status === "CANCELED") throw new Error("PAYMENT_CLOSED");
+      if (current.status !== "CONFIRMED") throw new Error("PAYMENT_NOT_CONFIRMED");
 
       const updated = await tx.payment.update({
         where: { id },
@@ -39,6 +39,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
       await tx.sale.update({
         where: { id: current.saleId },
+        data: { status: "CANCELED" }
+      });
+
+      await tx.order.updateMany({
+        where: { saleId: current.saleId, status: { not: "CANCELED" } },
         data: { status: "CANCELED" }
       });
 
@@ -57,7 +62,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   } catch (error) {
     if (error instanceof Error) {
       if (error.message === "PAYMENT_NOT_FOUND") return NextResponse.json({ error: "Pagamento não encontrado." }, { status: 404 });
-      if (error.message === "PAYMENT_CLOSED") return NextResponse.json({ error: "Pagamento encerrado não pode ser estornado." }, { status: 409 });
+      if (error.message === "PAYMENT_NOT_CONFIRMED") return NextResponse.json({ error: "Apenas pagamentos confirmados podem ser estornados." }, { status: 409 });
     }
 
     warnInDevelopment("Payment refund failed", error);

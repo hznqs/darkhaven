@@ -8,7 +8,7 @@ import { readWithRetry } from "@/lib/server/read-retry";
 import { parseJsonBody } from "@/lib/server/errors";
 
 export async function GET(request: NextRequest) {
-  const admin = requireAdmin(request);
+  const admin = await requireAdmin(request);
   if (!admin.ok) {
     return NextResponse.json({ error: admin.message }, { status: admin.status });
   }
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const admin = requireAdmin(request);
+  const admin = await requireAdmin(request);
   if (!admin.ok) {
     return NextResponse.json({ error: admin.message }, { status: admin.status });
   }

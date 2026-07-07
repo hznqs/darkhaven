@@ -332,7 +332,7 @@ function groupAverageTicketByDay(points: { date: Date; value: number }[]) {
   return Array.from(map.entries()).map(([day, value]) => ({ day: day.slice(5), value: value.count ? value.total / value.count : 0 }));
 }
 
-function getBusinessDateParts(date: Date) {
+export function getBusinessDateParts(date: Date) {
   const parts = Object.fromEntries(
     businessDateFormatter
       .formatToParts(date)
@@ -347,7 +347,7 @@ function getBusinessDateParts(date: Date) {
   };
 }
 
-function formatBusinessDayKey(date: Date) {
+export function formatBusinessDayKey(date: Date) {
   const parts = getBusinessDateParts(date);
   return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
 }
@@ -356,12 +356,29 @@ function businessLocalDate(year: number, month: number, day: number) {
   return new Date(Date.UTC(year, month - 1, day, 12));
 }
 
-function businessDateToUtcStart(year: number, month: number, day: number) {
+export function businessDateToUtcStart(year: number, month: number, day: number) {
   return new Date(Date.UTC(year, month - 1, day, saoPauloUtcOffsetHours, 0, 0, 0));
 }
 
-function businessDateToUtcEnd(year: number, month: number, day: number) {
+export function businessDateToUtcEnd(year: number, month: number, day: number) {
   return new Date(Date.UTC(year, month - 1, day + 1, saoPauloUtcOffsetHours, 0, 0, -1));
+}
+
+export function businessStartOfToday() {
+  const parts = getBusinessDateParts(new Date());
+  return businessDateToUtcStart(parts.year, parts.month, parts.day);
+}
+
+export function businessStartOfWeek() {
+  const parts = getBusinessDateParts(new Date());
+  const local = businessLocalDate(parts.year, parts.month, parts.day);
+  local.setUTCDate(local.getUTCDate() - local.getUTCDay());
+  return businessDateToUtcStart(local.getUTCFullYear(), local.getUTCMonth() + 1, local.getUTCDate());
+}
+
+export function businessStartOfMonth() {
+  const parts = getBusinessDateParts(new Date());
+  return businessDateToUtcStart(parts.year, parts.month, 1);
 }
 
 function groupByLabel(points: { label: string; value: number }[]) {

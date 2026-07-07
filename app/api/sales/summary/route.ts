@@ -3,7 +3,7 @@ import { buildSaleWhere, getSalesSummary } from "@/lib/server/sales";
 import { requireAuth } from "@/lib/server/security";
 
 export async function GET(request: NextRequest) {
-  const auth = requireAuth(request);
+  const auth = await requireAuth(request);
   if (!auth.ok) return NextResponse.json({ error: auth.message }, { status: auth.status });
 
   const where = buildSaleWhere(request.nextUrl.searchParams);

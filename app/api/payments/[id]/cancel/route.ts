@@ -11,7 +11,7 @@ type RouteContext = {
 };
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
-  const admin = requireAdmin(request);
+  const admin = await requireAdmin(request);
   if (!admin.ok) return NextResponse.json({ error: admin.message }, { status: admin.status });
 
   const body = await parseJsonBody(request);
@@ -40,6 +40,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
       await tx.sale.update({
         where: { id: current.saleId },
+        data: { status: "CANCELED" }
+      });
+
+      await tx.order.updateMany({
+        where: { saleId: current.saleId, status: { not: "CANCELED" } },
         data: { status: "CANCELED" }
       });
 

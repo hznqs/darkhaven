@@ -11,7 +11,7 @@ type RouteContext = {
 };
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
-  const owner = requireOwnerAdmin(request);
+  const owner = await requireOwnerAdmin(request);
   if (!owner.ok) return NextResponse.json({ error: owner.message }, { status: owner.status });
 
   const { id } = await context.params;
@@ -61,7 +61,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 }
 
 export async function DELETE(request: NextRequest, context: RouteContext) {
-  const owner = requireOwnerAdmin(request);
+  const owner = await requireOwnerAdmin(request);
   if (!owner.ok) return NextResponse.json({ error: owner.message }, { status: owner.status });
 
   const { id } = await context.params;

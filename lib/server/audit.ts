@@ -20,13 +20,23 @@ export async function writeAuditLogSafe(input: AuditInput) {
         })
       : null;
 
+    const safeMetadata =
+      typeof input.metadata === "object" && input.metadata !== null
+        ? (Object.fromEntries(
+            Object.entries(input.metadata as Record<string, unknown>).map(([k, v]) => [
+              k,
+              typeof v === "string" ? v.slice(0, 500) : v
+            ])
+          ) as Prisma.InputJsonValue)
+        : input.metadata;
+
     return await prisma.auditLog.create({
       data: {
         userId: user?.id ?? null,
         action: input.action,
         entity: input.entity,
         entityId: input.entityId,
-        metadata: input.metadata
+        metadata: safeMetadata
       }
     });
   } catch (error) {

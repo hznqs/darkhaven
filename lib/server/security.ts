@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import type { NextRequest } from "next/server";
 import type { AppUser } from "@/lib/types";
+import { prisma } from "@/lib/server/prisma";
+import { readWithRetry } from "@/lib/server/read-retry";
 
 export const sessionCookieName = "darkhaven_session";
 
@@ -10,6 +12,7 @@ type SessionPayload = {
   name: string;
   role: AppUser["role"];
   isOwnerAdmin: boolean;
+  iat: number;
   exp: number;
 };
 
@@ -17,14 +20,19 @@ export type AuthResult =
   | { ok: true; user: AppUser; userId: string }
   | { ok: false; status: number; message: string };
 
-export function signSession(user: Pick<AppUser, "id" | "email" | "name" | "role" | "isOwnerAdmin">) {
+export function signSession(
+  user: Pick<AppUser, "id" | "email" | "name" | "role" | "isOwnerAdmin">,
+  ttlSeconds = 60 * 60 * 8
+) {
+  const now = Math.floor(Date.now() / 1000);
   const payload: SessionPayload = {
     sub: user.id,
     email: user.email,
     name: user.name,
     role: user.role,
     isOwnerAdmin: user.isOwnerAdmin,
-    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8
+    iat: now,
+    exp: now + ttlSeconds
   };
 
   const encodedHeader = base64UrlEncode(JSON.stringify({ alg: "HS256", typ: "JWT" }));
@@ -33,30 +41,77 @@ export function signSession(user: Pick<AppUser, "id" | "email" | "name" | "role"
   return `${encodedHeader}.${encodedPayload}.${signature}`;
 }
 
-export function requireAuth(request: NextRequest): AuthResult {
+export async function requireAuth(request: NextRequest): Promise<AuthResult> {
   const token = request.cookies.get(sessionCookieName)?.value;
   const payload = token ? verifySession(token) : null;
   if (!payload) {
     return { ok: false, status: 401, message: "Autenticação obrigatória." };
   }
 
-  return {
-    ok: true,
-    userId: payload.sub,
-    user: {
-      id: payload.sub,
-      email: payload.email,
-      name: payload.name,
-      role: payload.role,
-      active: true,
-      isOwnerAdmin: payload.isOwnerAdmin,
-      createdAt: new Date(0).toISOString()
+  try {
+    const fresh = await readWithRetry(() =>
+      prisma.user.findUnique({
+        where: { id: payload.sub },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          active: true,
+          isOwnerAdmin: true,
+          lastLoginAt: true,
+          createdAt: true
+        }
+      })
+    );
+
+    if (!fresh || !fresh.active) {
+      return { ok: false, status: 401, message: "Sessão expirada ou usuário desativado." };
     }
-  };
+
+    if (fresh.lastLoginAt && payload.iat && fresh.lastLoginAt.getTime() > (payload.iat + 1) * 1000) {
+      return { ok: false, status: 401, message: "Sessão invalidada. Faça login novamente." };
+    }
+
+    if (fresh.role !== payload.role || fresh.isOwnerAdmin !== payload.isOwnerAdmin) {
+      return { ok: false, status: 401, message: "Sessão desatualizada. Faça login novamente." };
+    }
+
+    return {
+      ok: true,
+      userId: fresh.id,
+      user: {
+        id: fresh.id,
+        email: fresh.email,
+        name: fresh.name,
+        role: fresh.role,
+        active: fresh.active,
+        isOwnerAdmin: fresh.isOwnerAdmin,
+        createdAt: fresh.createdAt.toISOString()
+      }
+    };
+  } catch (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.warn("requireAuth DB revalidation:", error instanceof Error ? error.message : error);
+    }
+    return {
+      ok: true,
+      userId: payload.sub,
+      user: {
+        id: payload.sub,
+        email: payload.email,
+        name: payload.name,
+        role: payload.role,
+        active: true,
+        isOwnerAdmin: payload.isOwnerAdmin,
+        createdAt: new Date(0).toISOString()
+      }
+    };
+  }
 }
 
-export function requireAdmin(request: NextRequest): AuthResult {
-  const auth = requireAuth(request);
+export async function requireAdmin(request: NextRequest): Promise<AuthResult> {
+  const auth = await requireAuth(request);
   if (!auth.ok) return auth;
   if (auth.user.role !== "ADMIN") {
     return { ok: false, status: 403, message: "Usuário ADMIN autenticado é obrigatório para esta ação." };
@@ -64,8 +119,8 @@ export function requireAdmin(request: NextRequest): AuthResult {
   return auth;
 }
 
-export function requireOwnerAdmin(request: NextRequest): AuthResult {
-  const auth = requireAdmin(request);
+export async function requireOwnerAdmin(request: NextRequest): Promise<AuthResult> {
+  const auth = await requireAdmin(request);
   if (!auth.ok) return auth;
   if (!auth.user.isOwnerAdmin) {
     return { ok: false, status: 403, message: "Apenas o admin principal pode executar esta ação." };

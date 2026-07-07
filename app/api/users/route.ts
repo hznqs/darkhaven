@@ -7,7 +7,7 @@ import { userCreateSchema } from "@/lib/server/validators";
 import { parseJsonBody, safeErrorResponse, warnInDevelopment } from "@/lib/server/errors";
 
 export async function GET(request: NextRequest) {
-  const owner = requireOwnerAdmin(request);
+  const owner = await requireOwnerAdmin(request);
   if (!owner.ok) return NextResponse.json({ error: owner.message }, { status: owner.status });
 
   const users = await prisma.user.findMany({ orderBy: [{ isOwnerAdmin: "desc" }, { createdAt: "desc" }] });
@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const owner = requireOwnerAdmin(request);
+  const owner = await requireOwnerAdmin(request);
   if (!owner.ok) return NextResponse.json({ error: owner.message }, { status: owner.status });
 
   const body = await parseJsonBody(request);

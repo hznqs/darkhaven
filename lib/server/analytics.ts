@@ -1,14 +1,13 @@
 import { prisma } from "@/lib/server/prisma";
 import { readWithRetry } from "@/lib/server/read-retry";
+import { businessStartOfToday, businessStartOfWeek, businessStartOfMonth, formatBusinessDayKey } from "@/lib/server/sales";
 
 const channelColors = ["#f4f2ec", "#9aa1a9", "#5b7567", "#d8b15d", "#8f1d1d"];
 
 export async function getDashboardData() {
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startOfWeek = new Date(startOfToday);
-  startOfWeek.setDate(startOfToday.getDate() - startOfToday.getDay());
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfToday = businessStartOfToday();
+  const startOfWeek = businessStartOfWeek();
+  const startOfMonth = businessStartOfMonth();
   const [
     confirmedSales,
     payments,
@@ -132,13 +131,13 @@ export async function getFinanceData() {
 export function groupRevenueByDay(points: { date: Date; value: number }[]) {
   const map = new Map<string, number>();
   for (const point of points) {
-    const day = String(point.date.getDate()).padStart(2, "0");
+    const day = formatBusinessDayKey(point.date);
     map.set(day, (map.get(day) ?? 0) + point.value);
   }
 
   return Array.from(map.entries())
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([day, value]) => ({ day, value }));
+    .map(([day, value]) => ({ day: day.slice(5), value }));
 }
 
 export function groupByLabel(points: { label: string; value: number }[]) {

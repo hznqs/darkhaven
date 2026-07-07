@@ -1,11 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/server/prisma";
-import { requireAuth } from "@/lib/server/security";
+import { requireAuth, requireAdmin } from "@/lib/server/security";
+import { safeErrorResponse, warnInDevelopment, parseJsonBody } from "@/lib/server/errors";
 import { z } from "zod";
 
 const settingsSchema = z.object({
   storeName: z.string().min(2).max(100).optional(),
-  cnpj: z.string().max(20).optional().nullable(),
   whatsapp: z.string().max(20).optional().nullable(),
   email: z.string().email().max(120).optional().nullable(),
   theme: z.enum(["dark"]).optional(),
@@ -15,13 +15,15 @@ const settingsSchema = z.object({
 async function getOrCreateSettings() {
   const existing = await prisma.storeSettings.findFirst();
   if (existing) return existing;
-  return prisma.storeSettings.create({
-    data: { storeName: "DarkHaven" }
-  });
+  try {
+    return await prisma.storeSettings.create({ data: { storeName: "DarkHaven" } });
+  } catch {
+    return prisma.storeSettings.findFirstOrThrow();
+  }
 }
 
 export async function GET(request: NextRequest) {
-  const auth = requireAuth(request);
+  const auth = await requireAuth(request);
   if (!auth.ok) return NextResponse.json({ error: auth.message }, { status: auth.status });
 
   try {
@@ -30,7 +32,6 @@ export async function GET(request: NextRequest) {
       data: {
         id: settings.id,
         storeName: settings.storeName,
-        cnpj: (settings as Record<string, unknown>).cnpj as string | null ?? null,
         whatsapp: settings.whatsapp ?? null,
         email: settings.email ?? null,
         theme: settings.theme,
@@ -39,23 +40,22 @@ export async function GET(request: NextRequest) {
       }
     });
   } catch (error) {
-    console.error("[Settings GET]", error);
-    return NextResponse.json({ error: "Erro ao carregar configurações." }, { status: 500 });
+    warnInDevelopment("Settings GET", error);
+    return safeErrorResponse("Erro ao carregar configurações.");
   }
 }
 
 export async function PATCH(request: NextRequest) {
-  const auth = requireAuth(request);
+  const auth = await requireAdmin(request);
   if (!auth.ok) return NextResponse.json({ error: auth.message }, { status: auth.status });
-  if (auth.user.role !== "ADMIN") {
-    return NextResponse.json({ error: "Apenas administradores podem alterar as configurações." }, { status: 403 });
-  }
 
   try {
-    const body = (await request.json().catch(() => ({}))) as unknown;
-    const parsed = settingsSchema.safeParse(body);
+    const body = await parseJsonBody(request);
+    if (!body.ok) return body.response;
+
+    const parsed = settingsSchema.safeParse(body.data);
     if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+      return NextResponse.json({ error: parsed.error.flatten() }, { status: 422 });
     }
 
     const current = await getOrCreateSettings();
@@ -68,7 +68,6 @@ export async function PATCH(request: NextRequest) {
       data: {
         id: updated.id,
         storeName: updated.storeName,
-        cnpj: (updated as Record<string, unknown>).cnpj as string | null ?? null,
         whatsapp: updated.whatsapp ?? null,
         email: updated.email ?? null,
         theme: updated.theme,
@@ -77,7 +76,7 @@ export async function PATCH(request: NextRequest) {
       }
     });
   } catch (error) {
-    console.error("[Settings PATCH]", error);
-    return NextResponse.json({ error: "Erro ao salvar configurações." }, { status: 500 });
+    warnInDevelopment("Settings PATCH", error);
+    return safeErrorResponse("Erro ao salvar configurações.");
   }
 }

@@ -6,11 +6,11 @@ import { requireAdmin, requireAuth } from "@/lib/server/security";
 import { serializeCustomer } from "@/lib/server/serializers";
 import { customerSchema } from "@/lib/server/validators";
 import { readWithRetry } from "@/lib/server/read-retry";
-import { parseJsonBody, safeErrorResponse, warnInDevelopment } from "@/lib/server/errors";
+import { parseJsonBody, safeErrorResponse, warnInDevelopment, isUniqueConstraintError } from "@/lib/server/errors";
 import { getPaidTotalsByCustomerIds } from "@/lib/server/customers";
 
 export async function GET(request: NextRequest) {
-  const auth = requireAuth(request);
+  const auth = await requireAuth(request);
   if (!auth.ok) return NextResponse.json({ error: auth.message }, { status: auth.status });
 
   const search = request.nextUrl.searchParams.get("search")?.trim();
@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const admin = requireAdmin(request);
+  const admin = await requireAdmin(request);
   if (!admin.ok) return NextResponse.json({ error: admin.message }, { status: admin.status });
 
   const body = await parseJsonBody(request);
@@ -73,6 +73,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ data: serializeCustomer(customer) }, { status: 201 });
   } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      return NextResponse.json({ error: "Já existe cliente com este WhatsApp." }, { status: 409 });
+    }
     warnInDevelopment("Customer creation failed", error);
     return safeErrorResponse("Não foi possível criar o cliente.");
   }

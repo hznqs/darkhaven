@@ -3,7 +3,12 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "DarkHaven CRM",
-  description: "CRM premium DarkHaven para clientes, vendas, pedidos, financeiro e pós-venda."
+  description: "CRM premium DarkHaven para clientes, vendas, pedidos, financeiro e pós-venda.",
+  metadataBase: new URL(process.env.NEXT_PUBLIC_BASE_URL ?? "https://darkhavencrm.com.br"),
+  alternates: {
+    canonical: "/",
+    languages: { "pt-BR": "/" }
+  }
 };
 
 export const viewport: Viewport = {

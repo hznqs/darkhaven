@@ -6,7 +6,7 @@ import { requireAdmin, requireAuth } from "@/lib/server/security";
 import { serializeProduct } from "@/lib/server/serializers";
 import { productSchema } from "@/lib/server/validators";
 import { readWithRetry } from "@/lib/server/read-retry";
-import { parseJsonBody, safeErrorResponse, warnInDevelopment } from "@/lib/server/errors";
+import { parseJsonBody, safeErrorResponse, warnInDevelopment, isUniqueConstraintError } from "@/lib/server/errors";
 
 const productSelect = {
   id: true,
@@ -23,7 +23,7 @@ const productSelect = {
 } satisfies Prisma.ProductSelect;
 
 export async function GET(request: NextRequest) {
-  const auth = requireAuth(request);
+  const auth = await requireAuth(request);
   if (!auth.ok) return NextResponse.json({ error: auth.message }, { status: auth.status });
 
   const products = await readWithRetry(() =>
@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const admin = requireAdmin(request);
+  const admin = await requireAdmin(request);
   if (!admin.ok) return NextResponse.json({ error: admin.message }, { status: admin.status });
 
   const body = await parseJsonBody(request);
@@ -65,6 +65,9 @@ export async function POST(request: NextRequest) {
     await writeAuditLogSafe({ userId: admin.userId, action: "CREATE", entity: "Product", entityId: product.id });
     return NextResponse.json({ data: serializeProduct(product) }, { status: 201 });
   } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      return NextResponse.json({ error: "Já existe produto com este SKU." }, { status: 409 });
+    }
     warnInDevelopment("Product creation failed", error);
     return safeErrorResponse("Não foi possível criar o produto.");
   }

@@ -11,7 +11,7 @@ type RouteContext = {
 };
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
-  const admin = requireAdmin(request);
+  const admin = await requireAdmin(request);
   if (!admin.ok) {
     return NextResponse.json({ error: admin.message }, { status: admin.status });
   }
@@ -49,29 +49,28 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     );
   }
 
-  await writeAuditLogSafe({
-    userId: admin.userId,
-    action: "STATUS_CHANGE",
-    entity: "Order",
-    entityId: id,
-    metadata: {
-      from: currentOrder.status,
-      to: parsed.data.status
-    }
-  });
-
-  const updatedOrder = await prisma.order.update({
-    where: { id },
-    data: {
-      status: parsed.data.status
-    },
-    include: {
-      customer: true,
-      sale: true,
-      items: {
-        include: { product: true }
+  const updatedOrder = await prisma.$transaction(async (tx) => {
+    const updated = await tx.order.update({
+      where: { id },
+      data: { status: parsed.data.status },
+      include: {
+        customer: true,
+        sale: true,
+        items: { include: { product: true } }
       }
-    }
+    });
+
+    await tx.auditLog.create({
+      data: {
+        userId: admin.userId,
+        action: "STATUS_CHANGE",
+        entity: "Order",
+        entityId: id,
+        metadata: { from: currentOrder.status, to: parsed.data.status }
+      }
+    });
+
+    return updated;
   });
 
   return NextResponse.json({

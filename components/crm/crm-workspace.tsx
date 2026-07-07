@@ -46,8 +46,8 @@ import {
   X,
   type LucideIcon
 } from "lucide-react";
-import { brl, shortDate } from "@/lib/format";
-import { formatCurrencyBR, formatPhoneBR, normalizePhoneBR, parseCurrencyBR } from "@/lib/masks";
+import { brl, percent, shortDate } from "@/lib/format";
+import { formatCpfCnpj, formatCurrencyBR, formatPhoneBR, normalizePhoneBR, parseCurrencyBR } from "@/lib/masks";
 import type {
   AppUser,
   Customer,
@@ -1190,6 +1190,7 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
       {/* Desktop sidebar — hidden on mobile */}
       <aside
         className="fixed inset-y-0 left-0 z-50 hidden h-screen w-[248px] overflow-y-auto border-r border-white/10 bg-black/84 p-4 shadow-glass backdrop-blur-2xl soft-scroll lg:block"
+        aria-label="Navegação principal"
       >
         <Link
           href="/dashboard"
@@ -1204,7 +1205,7 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
             priority
           />
         </Link>
-        <nav className="space-y-1">
+        <nav className="space-y-1" aria-label="Módulos">
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href;
@@ -1212,6 +1213,7 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
               <Link
                 key={item.key}
                 href={item.href}
+                aria-current={active ? "page" : undefined}
                 className={`flex items-center gap-3 rounded-crm px-3 py-2.5 text-sm transition ${
                   active
                     ? "border border-white/12 bg-white/[0.09] text-white shadow-glow"
@@ -1695,11 +1697,11 @@ function ActionModal({
         <form className="space-y-4" onSubmit={onCustomerSubmit}>
           <FormInput label="Nome" name="name" required minLength={2} maxLength={100} defaultValue={editingCustomer?.name} />
           <FormInput label="WhatsApp" name="whatsapp" placeholder="19 99283-7929" required maxLength={13} mask="phone" defaultValue={editingCustomer ? formatPhoneBR(editingCustomer.whatsapp) : undefined} />
-          <FormInput label="E-mail" name="email" type="email" maxLength={120} defaultValue={editingCustomer?.email} />
-          <FormInput label="Endereço" name="address" maxLength={120} defaultValue={editingCustomer?.address} />
+<FormInput label="E-mail" name="email" type="email" maxLength={120} autoComplete="email" defaultValue={editingCustomer?.email} />
+           <FormInput label="Endereço" name="address" maxLength={120} autoComplete="street-address" defaultValue={editingCustomer?.address} />
           <div className="grid gap-3 sm:grid-cols-[1fr_120px]">
             <FormInput label="Cidade" name="city" maxLength={80} defaultValue={editingCustomer?.city} />
-            <FormInput label="UF" name="state" maxLength={2} defaultValue={editingCustomer?.state} />
+            <FormInput label="UF" name="state" maxLength={2} pattern="[A-Z]{2}" autoComplete="address-level1" autoCapitalize="characters" defaultValue={editingCustomer?.state?.toUpperCase() ?? undefined} />
           </div>
           <FormSelect label="Status" name="status" defaultValue={customerStatusValue(editingCustomer?.status)} options={[["active", "Ativo"], ["novo", "Novo"], ["recorrente", "Recorrente"], ["vip", "VIP"], ["inativo", "Inativo"]]} />
           <FormTextArea label="Observações" name="notes" maxLength={500} defaultValue={editingCustomer?.notes} />
@@ -1946,11 +1948,25 @@ function ActionModal({
 
 function ModalFrame({ title, children, onClose }: Readonly<{ title: string; children: React.ReactNode; onClose: () => void }>) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/72 px-4 py-6 backdrop-blur-md">
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/72 px-4 py-6 backdrop-blur-md"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          onClose();
+        }
+      }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       <section className="glass-panel max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-crm p-5 shadow-glass soft-scroll">
         <div className="mb-5 flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-white">{title}</h2>
-          <button className="rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-zinc-300 hover:text-white" onClick={onClose}>Fechar</button>
+          <button className="rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-zinc-300 hover:text-white" onClick={onClose} aria-label={`Fechar ${title}`}>Fechar</button>
         </div>
         {children}
       </section>
@@ -1961,12 +1977,18 @@ function ModalFrame({ title, children, onClose }: Readonly<{ title: string; chil
 function Toast({ toast, onClose }: Readonly<{ toast: NonNullable<ToastState>; onClose: () => void }>) {
   const tone = toast.type === "success" ? "border-moss/50 bg-moss/18" : toast.type === "error" ? "border-red-500/40 bg-red-500/14" : "border-ember/40 bg-ember/12";
   return (
-    <button
+    <div
+      role="status"
+      aria-live="polite"
       className={`fixed right-4 top-4 z-50 max-w-sm rounded-crm border px-4 py-3 text-left text-sm font-semibold text-white shadow-glass backdrop-blur-xl ${tone}`}
       onClick={onClose}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") onClose();
+      }}
+      tabIndex={0}
     >
       {toast.message}
-    </button>
+    </div>
   );
 }
 
@@ -1991,15 +2013,29 @@ function SaleDetailDrawer({
 }>) {
   if (!sale && !loading && !error) return null;
 
-  return (
-  <div className="fixed inset-0 z-50 grid place-items-center bg-black/72 px-4 py-6 backdrop-blur-md">
-    <aside className="glass-panel max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-crm border border-white/10 p-5 shadow-glass soft-scroll sm:p-6">
+return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/72 px-4 py-6 backdrop-blur-md"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Detalhes da venda"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          onClose();
+        }
+      }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <aside className="glass-panel max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-crm border border-white/10 p-5 shadow-glass soft-scroll sm:p-6">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-ember">Detalhes da venda</p>
             <h2 className="mt-1 text-2xl font-semibold text-white">{sale ? formatSaleCode(sale) : "Carregando..."}</h2>
           </div>
-          <button className="rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-zinc-300 hover:text-white" onClick={onClose}>Fechar</button>
+          <button className="rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-zinc-300 hover:text-white" onClick={onClose} aria-label="Fechar detalhes da venda">Fechar</button>
         </div>
 
         {loading ? <LoadingState /> : null}
@@ -2040,7 +2076,7 @@ function SaleDetailDrawer({
                   <SummaryRow label="Ticket da venda" value={brl(sale.ticket)} />
                   <SummaryRow label="Custo estimado" value={brl(sale.estimatedCost)} />
                   <SummaryRow label="Lucro estimado" value={brl(sale.estimatedProfit)} />
-                  <SummaryRow label="Margem estimada" value={`${sale.estimatedMargin.toFixed(2)}%`} />
+                  <SummaryRow label="Margem estimada" value={`${percent(sale.estimatedMargin, 2)}%`} />
                 </div>
               </GlassPanel>
             </section>
@@ -2134,8 +2170,10 @@ function FormInput({
   pattern,
   title,
   mask,
-  onValueChange
-}: Readonly<{ label: string; name: string; type?: string; required?: boolean; placeholder?: string; defaultValue?: string; min?: string; max?: string; step?: string; minLength?: number; maxLength?: number; pattern?: string; title?: string; mask?: "phone" | "currency"; onValueChange?: (value: string) => void }>) {
+  onValueChange,
+  autoComplete,
+  autoCapitalize
+}: Readonly<{ label: string; name: string; type?: string; required?: boolean; placeholder?: string; defaultValue?: string; min?: string; max?: string; step?: string; minLength?: number; maxLength?: number; pattern?: string; title?: string; mask?: "phone" | "currency" | "cnpj"; onValueChange?: (value: string) => void; autoComplete?: string; autoCapitalize?: string }>) {
   return (
     <label className="block space-y-2 text-sm text-zinc-300">
       <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">{label}</span>
@@ -2146,17 +2184,28 @@ function FormInput({
         required={required}
         placeholder={placeholder}
         defaultValue={defaultValue}
-        min={min}
+        min={min ?? (mask === "currency" ? "0" : undefined)}
         max={max}
         step={step}
         minLength={minLength}
-        maxLength={maxLength}
-        pattern={pattern}
-        title={title}
-        inputMode={mask === "currency" ? "numeric" : mask === "phone" ? "tel" : undefined}
+        maxLength={maxLength ?? (mask === "cnpj" ? 18 : maxLength)}
+        pattern={pattern ?? (type === "email" ? "[a-z0-9._%+\\-]+@[a-z0-9.\\-]+\\.[a-z]{2,}$" : undefined)}
+        title={title ?? (type === "email" ? "Insira um e-mail válido (ex: usuario@dominio.com)" : undefined)}
+        inputMode={mask === "currency" ? "numeric" : mask === "phone" ? "tel" : mask === "cnpj" ? "numeric" : undefined}
+        autoComplete={autoComplete ?? (mask === "phone" ? "tel" : undefined)}
+        autoCapitalize={autoCapitalize}
         onInput={(event) => {
+          if (mask === "currency") {
+            const digits = event.currentTarget.value.replace(/\D/g, "");
+            event.currentTarget.value = digits
+              ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(digits) / 100)
+              : "R$ 0,00";
+            const len = event.currentTarget.value.length;
+            event.currentTarget.setSelectionRange(len, len);
+            return;
+          }
           if (mask === "phone") event.currentTarget.value = formatPhoneBR(event.currentTarget.value);
-          if (mask === "currency") event.currentTarget.value = formatCurrencyBR(event.currentTarget.value);
+          if (mask === "cnpj") event.currentTarget.value = formatCpfCnpj(event.currentTarget.value);
           onValueChange?.(event.currentTarget.value);
         }}
         onChange={(event) => onValueChange?.(event.currentTarget.value)}
@@ -2546,10 +2595,10 @@ function createSaleDraftItem(): SaleDraftItem {
 function FormFooter({ submitting, submitError, onClose, label, disabled = false }: Readonly<{ submitting: boolean; submitError: string; onClose: () => void; label: string; disabled?: boolean }>) {
   return (
     <div className="space-y-3">
-      {submitError ? <p className="rounded-crm border border-red-500/35 bg-red-500/10 p-3 text-sm text-red-200">{submitError}</p> : null}
+      {submitError ? <p className="rounded-crm border border-red-500/35 bg-red-500/10 p-3 text-sm text-red-200" role="alert">{submitError}</p> : null}
       <div className="flex justify-end gap-2">
         <button type="button" className="rounded-crm border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-white" onClick={onClose}>Cancelar</button>
-        <button type="submit" className="rounded-crm bg-bone px-4 py-2 text-sm font-bold text-black disabled:cursor-not-allowed disabled:opacity-45" disabled={submitting || disabled}>
+        <button type="submit" className="rounded-crm bg-bone px-4 py-2 text-sm font-bold text-black disabled:cursor-not-allowed disabled:opacity-45" disabled={submitting || disabled} aria-busy={submitting}>
           {submitting ? "Salvando..." : label}
         </button>
       </div>
@@ -3586,7 +3635,7 @@ function Finance({ finance }: Readonly<{ finance: FinanceData }>) {
         <FinanceMetric label="Faturamento" value={brl(finance.summary.revenue)} hint="confirmados" />
         <FinanceMetric label="Custo" value={brl(finance.summary.estimatedCost)} hint="itens vendidos" warning />
         <FinanceMetric label="Lucro" value={brl(finance.summary.estimatedProfit)} hint="total - custo" />
-        <FinanceMetric label="Margem" value={`${finance.summary.estimatedMargin.toFixed(1)}%`} hint="confirmadas" />
+        <FinanceMetric label="Margem" value={`${percent(finance.summary.estimatedMargin, 1)}%`} hint="confirmadas" />
         <FinanceMetric label="Pendências" value={brl(finance.summary.pendingPayments)} hint="pendentes" warning />
         <FinanceMetric label="Ticket médio" value={brl(finance.summary.averageTicket)} hint="confirmadas" />
         <FinanceMetric label="Reembolsos" value={brl(finance.summary.refunds)} hint="manual" warning />
@@ -3599,7 +3648,7 @@ function Finance({ finance }: Readonly<{ finance: FinanceData }>) {
                 <AreaChart data={revenueSeries} margin={{ top: 12, right: 12, left: -18, bottom: 0 }}>
                   <XAxis dataKey="day" stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
                   <YAxis stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
-                  <Tooltip contentStyle={{ background: "#080a0c", border: "1px solid rgba(255,255,255,.12)", borderRadius: 8 }} />
+                  <Tooltip contentStyle={{ background: "#080a0c", border: "1px solid rgba(255,255,255,.12)", borderRadius: 8 }} formatter={(value) => brl(Number(value ?? 0))} />
                   <Area type="monotone" dataKey="value" stroke="#d8b15d" strokeWidth={2} fill="#d8b15d22" />
                 </AreaChart>
               </ResponsiveContainer>
@@ -3617,7 +3666,7 @@ function Finance({ finance }: Readonly<{ finance: FinanceData }>) {
                     <div className="h-2 w-2 rounded-full" style={{ backgroundColor: item.fill }} />
                     <span className="text-zinc-300">{item.name}</span>
                   </div>
-                  <span className="font-semibold text-white">{brl(item.value)}</span>
+                  <span className="font-semibold text-white">{item.value}%</span>
                 </div>
               ))
             ) : (
@@ -3769,7 +3818,7 @@ function SettingsPanel({
         <GlassPanel title="Dados da loja">
           <form id="settings-form" onSubmit={onSave} className="space-y-3">
             <Field label="Nome da loja" name="storeName" value={settings?.storeName ?? "DarkHaven"} required />
-            <Field label="CNPJ" name="cnpj" value={settings?.cnpj ?? ""} />
+            <FormInput label="CNPJ" name="cnpj" mask="cnpj" placeholder="00.000.000/0000-00" defaultValue={settings?.cnpj ?? undefined} />
             <Field label="WhatsApp" name="whatsapp" value={settings?.whatsapp ?? ""} />
             <Field label="E-mail" name="email" value={settings?.email ?? ""} type="email" />
             <div className="pt-2">
@@ -3941,7 +3990,7 @@ function Pill({ label, warning = false, className = "" }: Readonly<{ label: stri
 function IconButton({ label, icon: Icon, onClick, disabled = false }: Readonly<{ label: string; icon: LucideIcon; onClick?: () => void; disabled?: boolean }>) {
   return (
     <button
-      className="inline-flex h-8 w-8 items-center justify-center rounded-crm border border-white/10 bg-white/[0.04] text-zinc-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+      className="inline-flex h-10 w-10 items-center justify-center rounded-crm border border-white/10 bg-white/[0.04] text-zinc-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-35 sm:h-9 sm:w-9"
       aria-label={label}
       title={label}
       onClick={onClick}
@@ -4354,7 +4403,10 @@ function wait(ms: number) {
 
 function MobileBottomNav({ pathname }: Readonly<{ pathname: string }>) {
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-50 flex items-end justify-center lg:hidden">
+    <nav
+      className="fixed inset-x-0 bottom-0 z-50 flex items-end justify-center lg:hidden"
+      style={{ paddingBottom: "max(env(safe-area-inset-bottom), 0.75rem)" }}
+    >
       {/* Backdrop blur container */}
       <div className="mx-3 mb-3 flex w-full max-w-md items-end justify-between rounded-2xl border border-white/10 bg-[rgba(12,14,16,0.92)] px-3 py-2 shadow-glass backdrop-blur-2xl">
         {mobileNavItems.map((item) => {
@@ -4366,6 +4418,7 @@ function MobileBottomNav({ pathname }: Readonly<{ pathname: string }>) {
               <Link
                 key={item.key}
                 href={item.href}
+                aria-current={active ? "page" : undefined}
                 className="group relative -mt-5 flex flex-col items-center"
               >
                 {/* Glow effect */}
@@ -4393,6 +4446,7 @@ function MobileBottomNav({ pathname }: Readonly<{ pathname: string }>) {
             <Link
               key={item.key}
               href={item.href}
+              aria-current={active ? "page" : undefined}
               className="group flex flex-col items-center gap-1 px-2 py-1"
             >
               <Icon className={`h-5 w-5 transition-colors duration-200 ${

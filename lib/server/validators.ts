@@ -2,6 +2,12 @@ import { z } from "zod";
 import { normalizePhoneBR } from "@/lib/masks";
 import { getProductImagesBucket } from "@/lib/server/product-image-storage";
 
+const BR_UFS = [
+  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO",
+  "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI",
+  "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"
+] as const;
+
 export const orderStatuses = [
   "NEW",
   "WAITING_PAYMENT",
@@ -84,13 +90,19 @@ export const customerSchema = z.object({
   email: z.string().trim().max(120).email().optional().or(z.literal("")),
   address: z.string().trim().max(120).optional(),
   city: z.string().trim().max(80).optional(),
-  state: z.string().trim().max(2).transform((value) => value.toUpperCase()).optional(),
+  state: z
+  .string()
+  .trim()
+  .max(2)
+  .transform((value) => value.toUpperCase())
+  .optional()
+  .refine((value) => !value || BR_UFS.includes(value as (typeof BR_UFS)[number]), "UF inválida."),
   notes: z.string().trim().max(500).optional(),
   status: z.string().trim().max(40).default("active"),
-  tags: z.array(z.string().trim().max(40)).default([])
+  tags: z.array(z.string().trim().max(40)).max(20).default([])
 });
 
-export const leadStatuses = ["IN_PROGRESS", "CLOSED_WON", "CLOSED_LOST", "WAITING_REPLY"] as const;
+export const leadStatuses = ["NEW", "IN_PROGRESS", "INTERESTED", "WAITING_REPLY", "CLOSED_WON", "CLOSED_LOST"] as const;
 
 export const leadSchema = z.object({
   name: z.string().trim().min(2, "O nome precisa ter pelo menos 2 caracteres.").max(100),
@@ -104,7 +116,7 @@ export const productSchema = z.object({
   name: z.string().trim().min(2).max(120),
   category: z.string().trim().min(1).max(60),
   sku: z.string().trim().max(40).optional().or(z.literal("")),
-  price: z.number().min(0),
+  price: z.number().positive("O preço deve ser maior que zero."),
   cost: z.number().min(0).default(0),
   imageUrl: productImageUrlSchema.optional().or(z.literal("")),
   colors: optionListSchema.default([]),
@@ -153,7 +165,7 @@ export const postSaleSchema = z.object({
   priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).default("MEDIUM"),
   notes: z.string().trim().max(800).optional().or(z.literal("")),
   customerFeedback: z.string().max(800).optional(),
-  resolution: z.string().max(800).optional(),
+  resolution: z.string().trim().min(5, "A resolução precisa ter ao menos 5 caracteres.").max(800).optional(),
   responsibleUserId: z.string().optional(),
   nextActionAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   refundRequested: z.boolean().default(false),
@@ -166,5 +178,18 @@ export const postSaleSchema = z.object({
       path: ["refundReason"],
       message: "Motivo obrigatório para devolução/reembolso manual."
     });
+  }
+
+  if (data.nextActionAt) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const nextDate = new Date(`${data.nextActionAt}T12:00:00`);
+    if (nextDate < today) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["nextActionAt"],
+        message: "A data da próxima ação não pode ser no passado."
+      });
+    }
   }
 });

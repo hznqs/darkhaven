@@ -4008,7 +4008,7 @@ function PostSales({ postSales, onResolve, onDelete, onCreate }: Readonly<{ post
         title="Atendimentos"
         className="relative z-50"
         actions={
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full sm:w-auto sm:min-w-[450px] lg:min-w-[600px]">
             <PremiumSelect
               value={typeFilter}
               onChange={(val) => setTypeFilter(val as PostSaleType | "ALL")}

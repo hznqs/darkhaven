@@ -128,6 +128,17 @@ export async function requireOwnerAdmin(request: NextRequest): Promise<AuthResul
   return auth;
 }
 
+export function requireCron(request: NextRequest) {
+  const authHeader = request.headers.get("authorization");
+  if (
+    !process.env.CRON_SECRET ||
+    authHeader !== `Bearer ${process.env.CRON_SECRET}`
+  ) {
+    return { ok: false, status: 401, message: "Unauthorized cron request." };
+  }
+  return { ok: true };
+}
+
 export function sanitizeUser(user: {
   id: string;
   name: string;

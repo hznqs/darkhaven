@@ -41,6 +41,7 @@ import {
   Settings,
   ShoppingBag,
   Sparkles,
+  Trash2,
   UserX,
   Users,
   X,
@@ -871,6 +872,20 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
     }
   }
 
+  async function deletePostSale(id: string) {
+    const previous = postSales;
+    setPostSales((current) => current.filter((item) => item.id !== id));
+
+    const response = await fetch(`/api/post-sales/${id}`, { method: "DELETE" });
+
+    if (response.ok) {
+      showToast("success", "Atendimento excluído.");
+    } else {
+      setPostSales(previous);
+      showToast("error", "Não foi possível excluir o atendimento.");
+    }
+  }
+
   async function submitJson<T>(url: string, body: T, successMessage: string, method = "POST", refreshTarget: LoadTarget = "all") {
     setSubmitting(true);
     setSubmitError("");
@@ -1324,7 +1339,7 @@ export function CrmWorkspace({ module }: Readonly<{ module: ModuleKey }>) {
             />
           ) : null}
           {module === "finance" ? <Finance finance={finance} /> : null}
-          {module === "post-sales" ? <PostSales postSales={postSales} onResolve={resolvePostSale} onCreate={() => { openModal("post-sale"); void ensurePostSaleSales(); }} /> : null}
+          {module === "post-sales" ? <PostSales postSales={postSales} onResolve={resolvePostSale} onDelete={deletePostSale} onCreate={() => { openModal("post-sale"); void ensurePostSaleSales(); }} /> : null}
           {module === "settings" ? (
             <SettingsPanel
               settings={storeSettings}
@@ -3743,7 +3758,7 @@ function Finance({ finance }: Readonly<{ finance: FinanceData }>) {
   );
 }
 
-function PostSales({ postSales, onResolve, onCreate }: Readonly<{ postSales: PostSale[]; onResolve: (id: string) => void; onCreate: () => void }>) {
+function PostSales({ postSales, onResolve, onDelete, onCreate }: Readonly<{ postSales: PostSale[]; onResolve: (id: string) => void; onDelete: (id: string) => void; onCreate: () => void }>) {
   const [typeFilter, setTypeFilter] = useState<PostSaleType | "ALL">("ALL");
   const [statusFilter, setStatusFilter] = useState<PostSaleStatus | "ALL">("ALL");
   const [priorityFilter, setPriorityFilter] = useState<Priority | "ALL">("ALL");
@@ -3853,6 +3868,18 @@ function PostSales({ postSales, onResolve, onCreate }: Readonly<{ postSales: Pos
                   <CheckCircle2 className="h-4 w-4" aria-hidden />
                   Marcar como resolvido
                 </button>
+                <button
+                  className="inline-flex items-center gap-2 rounded-crm border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-400 hover:bg-red-500/20 transition-colors"
+                  onClick={() => {
+                    if (window.confirm("Tem certeza que deseja excluir este atendimento de pós-venda? Esta ação não pode ser desfeita.")) {
+                      onDelete(item.id);
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" aria-hidden />
+                  Excluir
+                </button>
+
               </div>
             </article>
           ))}
@@ -3862,6 +3889,7 @@ function PostSales({ postSales, onResolve, onCreate }: Readonly<{ postSales: Pos
     </div>
   );
 }
+
 
 function Pagination({ page, totalPages, onChange }: Readonly<{ page: number; totalPages: number; onChange: (p: number) => void }>) {
   if (totalPages <= 1) return null;

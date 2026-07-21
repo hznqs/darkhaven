@@ -129,6 +129,10 @@ export async function requireOwnerAdmin(request: NextRequest): Promise<AuthResul
 }
 
 export function requireCron(request: NextRequest) {
+  if (process.env.NODE_ENV === "development") {
+    return { ok: true };
+  }
+
   const authHeader = request.headers.get("authorization");
   if (
     !process.env.CRON_SECRET ||

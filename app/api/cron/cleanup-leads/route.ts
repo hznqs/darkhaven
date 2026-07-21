@@ -11,15 +11,15 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const threeDaysAgo = new Date();
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
 
     // Encontra os leads para poder registrar no audit log antes de excluir em lote
     const leadsToDelete = await prisma.lead.findMany({
       where: {
         status: "CLOSED_LOST",
         updatedAt: {
-          lt: sevenDaysAgo,
+          lt: threeDaysAgo,
         },
       },
       select: { id: true },
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
       where: {
         status: "CLOSED_LOST",
         updatedAt: {
-          lt: sevenDaysAgo,
+          lt: threeDaysAgo,
         },
       },
     });
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
         action: "DELETE",
         entity: "Lead",
         entityId: lead.id,
-        metadata: { reason: "Automated cleanup: CLOSED_LOST > 7 days" },
+        metadata: { reason: "Automated cleanup: CLOSED_LOST > 3 days" },
       });
     }
 

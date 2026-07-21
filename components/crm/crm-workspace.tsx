@@ -22,7 +22,11 @@ import {
   AlertTriangle,
   BadgeDollarSign,
   Boxes,
+  Calendar,
   CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
   Copy,
   CreditCard,
@@ -146,6 +150,235 @@ type SaleDraftItem = {
 };
 
 type SaleDiscountMode = "AMOUNT" | "PERCENTAGE";
+
+type PremiumSelectOption = {
+  value: string;
+  label: string;
+  render?: React.ReactNode;
+  searchString?: string;
+};
+
+type PremiumSelectProps = {
+  value: string;
+  onChange: (value: string) => void;
+  options: PremiumSelectOption[];
+  placeholder?: string;
+  searchable?: boolean;
+  className?: string;
+  disabled?: boolean;
+  name?: string;
+};
+
+function PremiumSelect({
+  value,
+  onChange,
+  options,
+  placeholder = "Selecione",
+  searchable = false,
+  className = "",
+  disabled = false,
+  name
+}: PremiumSelectProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredOptions = useMemo(() => {
+    if (!searchable || !search) return options;
+    const lowerSearch = search.toLowerCase();
+    return options.filter(opt => 
+      opt.label.toLowerCase().includes(lowerSearch) || 
+      (opt.searchString && opt.searchString.toLowerCase().includes(lowerSearch))
+    );
+  }, [options, search, searchable]);
+
+  const selectedOption = options.find(o => o.value === value);
+
+  return (
+    <div className={`relative w-full ${className}`} ref={containerRef}>
+      {name && <input type="hidden" name={name} value={value} />}
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex w-full min-h-[48px] md:min-h-[40px] appearance-none items-center justify-between rounded-crm border border-white/10 bg-black/60 px-3 py-2 text-left text-base md:text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 focus:shadow-[0_0_0_3px_rgba(216,177,93,0.08)] disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <div className="flex-1 overflow-hidden truncate">
+          {selectedOption ? (selectedOption.render || selectedOption.label) : <span className="text-white/50">{placeholder}</span>}
+        </div>
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`h-4 w-4 ml-2 opacity-50 shrink-0 transition-transform ${isOpen ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+
+      {isOpen && (
+        <div className="absolute z-[100] mt-1 w-full overflow-hidden rounded-crm border border-amber-500/30 bg-[#0a0a0a] shadow-lg shadow-black/50">
+          {searchable && (
+            <div className="p-2 border-b border-white/10">
+              <div className="flex items-center rounded-md border border-amber-500/30 bg-black/40 px-3 py-2 focus-within:border-amber-500/60 transition-colors">
+                <Search className="mr-2 h-4 w-4 text-white/50" />
+                <input
+                  type="text"
+                  placeholder="Buscar..."
+                  className="w-full bg-transparent text-sm text-white outline-none placeholder:text-white/40"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  autoFocus
+                />
+              </div>
+            </div>
+          )}
+          <div className="max-h-60 overflow-auto py-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.1)_transparent]">
+            {filteredOptions.length === 0 ? (
+              <div className="px-3 py-4 text-center text-sm text-white/50">Nenhum resultado</div>
+            ) : (
+              filteredOptions.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => {
+                    onChange(opt.value);
+                    setIsOpen(false);
+                    setSearch("");
+                  }}
+                  className={`flex w-full items-center px-3 py-2.5 text-left text-sm transition-colors hover:bg-white/10 ${
+                    value === opt.value ? "bg-ember/10 text-white font-medium" : "text-white/80"
+                  }`}
+                >
+                  <div className="w-full">{opt.render || opt.label}</div>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PremiumDatePicker({ value, onChange, placeholder = "Selecione a data", name, disabled }: { value?: string, onChange?: (val: string) => void, placeholder?: string, name?: string, disabled?: boolean }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    if (value) {
+      const d = new Date(value + "T12:00:00");
+      return new Date(d.getFullYear(), d.getMonth(), 1);
+    }
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), 1);
+  });
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const monthNames = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+
+  function generateDays() {
+    const days = [];
+    const daysInMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate();
+    const firstDayOfMonth = currentMonth.getDay();
+
+    for (let i = 0; i < firstDayOfMonth; i++) {
+      days.push(<div key={`empty-${i}`} className="h-8 w-8" />);
+    }
+
+    for (let i = 1; i <= daysInMonth; i++) {
+      const dateStr = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, "0")}-${String(i).padStart(2, "0")}`;
+      
+      const localToday = new Date();
+      const todayStr = `${localToday.getFullYear()}-${String(localToday.getMonth() + 1).padStart(2, "0")}-${String(localToday.getDate()).padStart(2, "0")}`;
+      
+      const isToday = todayStr === dateStr;
+      const isSelected = value === dateStr;
+
+      days.push(
+        <button
+          key={i}
+          type="button"
+          onClick={() => {
+            onChange?.(dateStr);
+            setIsOpen(false);
+          }}
+          className={`flex h-8 w-8 items-center justify-center rounded-full text-sm transition-all duration-200 ${isSelected ? "bg-gradient-to-br from-ember to-amber-600 text-black font-bold shadow-[0_0_15px_rgba(216,177,93,0.5)] scale-105" : isToday ? "bg-white/10 text-white font-medium border border-white/20" : "text-zinc-300 hover:bg-white/10 hover:text-white"}`}
+        >
+          {i}
+        </button>
+      );
+    }
+    return days;
+  }
+
+  const formatDateStr = (dateStr: string) => {
+    const d = new Date(dateStr + "T12:00:00");
+    if (isNaN(d.getTime())) return dateStr;
+    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+  };
+
+  return (
+    <div className={`relative w-full ${isOpen ? "z-[9999]" : ""} `} ref={containerRef}>
+      {name && <input type="hidden" name={name} value={value ?? ""} />}
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex w-full min-h-[48px] md:min-h-[40px] appearance-none items-center justify-between rounded-crm border border-white/10 bg-black/60 px-3 py-2 text-left text-base md:text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 focus:shadow-[0_0_0_3px_rgba(216,177,93,0.08)] disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <span className={value ? "text-white" : "text-white/50"}>
+          {value ? formatDateStr(value) : placeholder}
+        </span>
+        <Calendar className={`h-4 w-4 ml-2 shrink-0 transition-transform ${isOpen ? "text-ember opacity-100" : "text-white opacity-50"}`} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute z-[100] mt-1 w-[280px] overflow-hidden rounded-crm border border-amber-500/30 bg-[#0a0a0a] shadow-lg shadow-black/50 p-4">
+          <div className="flex justify-between items-center mb-4 text-white">
+            <button type="button" onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))} className="p-1.5 hover:bg-white/10 rounded-full transition-colors text-zinc-400 hover:text-white">
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span className="text-sm font-bold tracking-wide">{monthNames[currentMonth.getMonth()]} {currentMonth.getFullYear()}</span>
+            <button type="button" onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))} className="p-1.5 hover:bg-white/10 rounded-full transition-colors text-zinc-400 hover:text-white">
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="grid grid-cols-7 gap-1 place-items-center mb-2 text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+            <span>D</span><span>S</span><span>T</span><span>Q</span><span>Q</span><span>S</span><span>S</span>
+          </div>
+          <div className="grid grid-cols-7 gap-1 place-items-center">
+            {generateDays()}
+          </div>
+          <div className="mt-4 pt-3 border-t border-white/10 flex justify-between">
+             <button type="button" onClick={(e) => { e.stopPropagation(); onChange?.(""); setIsOpen(false); }} className="text-xs font-medium text-zinc-400 hover:text-white">
+               Limpar
+             </button>
+             <button type="button" onClick={(e) => { 
+                e.stopPropagation(); 
+                onChange?.(new Date().toISOString().split("T")[0]); 
+                setIsOpen(false); 
+              }} className="text-xs font-medium text-ember hover:text-ember/80">
+               Hoje
+             </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const navItems: NavItem[] = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: Home },
@@ -2172,32 +2405,32 @@ return (
   );
 }
 
-function FormInput({
-  label,
-  name,
-  type = "text",
-  required = false,
-  placeholder,
-  defaultValue,
-  min,
-  max,
-  step,
-  minLength,
-  maxLength,
-  pattern,
-  title,
-  mask,
-  onValueChange,
-  autoComplete,
-  autoCapitalize
-}: Readonly<{ label: string; name: string; type?: string; required?: boolean; placeholder?: string; defaultValue?: string; min?: string; max?: string; step?: string; minLength?: number; maxLength?: number; pattern?: string; title?: string; mask?: "phone" | "currency" | "cnpj"; onValueChange?: (value: string) => void; autoComplete?: string; autoCapitalize?: string }>) {
+function FormInput({ label, name, type = "text", required = false, mask, min, max, step, placeholder, minLength, maxLength, pattern, title, autoComplete, autoCapitalize, defaultValue, onValueChange }: Readonly<{ label: string; name: string; type?: string; required?: boolean; mask?: "currency" | "phone" | "cnpj"; min?: string | number; max?: string | number; step?: string | number; placeholder?: string; minLength?: number; maxLength?: number; pattern?: string; title?: string; autoComplete?: string; autoCapitalize?: string; defaultValue?: string; onValueChange?: (val: string) => void }>) {
   const isDate = type === "date";
+  const [dateVal, setDateVal] = useState(defaultValue ?? "");
+
+  if (isDate) {
+    return (
+      <label className="block space-y-2 text-sm text-zinc-300">
+        <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">{label}</span>
+        <PremiumDatePicker 
+          name={name} 
+          value={dateVal} 
+          onChange={(val) => {
+            setDateVal(val);
+            onValueChange?.(val);
+          }}
+          placeholder={placeholder ?? "Selecione a data"}
+        />
+      </label>
+    );
+  }
 
   return (
     <label className="block space-y-2 text-sm text-zinc-300">
       <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">{label}</span>
       <input
-        className={isDate ? "w-full rounded-crm border border-white/10 bg-white/[0.04] px-3 py-3 text-white outline-none focus:border-ember/60 min-h-[50px] md:min-h-0 text-base md:text-sm [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:scale-150 [&::-webkit-calendar-picker-indicator]:md:scale-100 [&::-webkit-calendar-picker-indicator]:opacity-70 [&::-webkit-calendar-picker-indicator]:hover:opacity-100 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-date-and-time-value]:text-left" : "w-full rounded-crm border border-white/10 bg-white/[0.04] px-3 py-3 text-white outline-none focus:border-ember/60"}
+        className="w-full rounded-crm border border-white/10 bg-white/[0.04] px-3 py-3 text-white outline-none focus:border-ember/60"
         name={name}
         type={mask ? "text" : type}
         required={required}
@@ -2295,23 +2528,17 @@ function FormSelect({ label, name, options, required = false, defaultValue, valu
   return (
     <label className="block space-y-2 text-sm text-zinc-300">
       <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">{label}</span>
-      <div className="relative">
-        <select
-          className="w-full appearance-none rounded-crm border border-white/10 bg-black/70 px-3 py-3 pr-10 text-white outline-none transition hover:border-white/20 focus:border-ember/60 focus:shadow-[0_0_0_3px_rgba(216,177,93,0.08)] disabled:cursor-not-allowed disabled:opacity-50 min-h-[50px] md:min-h-0 text-base md:text-sm sm:py-2.5"
-          name={name}
-          required={required}
-          defaultValue={value === undefined ? defaultValue : undefined}
-          value={value}
-          onChange={(event) => onValueChange?.(event.target.value)}
-          disabled={disabled}
-        >
-          <option value="">{placeholder ?? (required ? "Selecione" : "Nenhum")}</option>
-          {options.map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}
-        </select>
-        <svg className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
-      </div>
+      <PremiumSelect
+        name={name}
+        value={value ?? defaultValue ?? ""}
+        onChange={(val) => onValueChange?.(val)}
+        disabled={disabled}
+        placeholder={placeholder ?? (required ? "Selecione" : "Nenhum")}
+        options={[
+          { value: "", label: placeholder ?? (required ? "Selecione" : "Nenhum") },
+          ...options.map(([optionValue, optionLabel]) => ({ value: optionValue, label: optionLabel }))
+        ]}
+      />
     </label>
   );
 }
@@ -2325,24 +2552,23 @@ function PaymentSalePicker({ sales }: Readonly<{ sales: SaleSummary[] }>) {
     <div className="space-y-3">
       <label className="block space-y-2 text-sm text-zinc-300">
         <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">Venda</span>
-        <div className="relative">
-          <select
-            className="w-full appearance-none rounded-crm border border-white/10 bg-black/70 px-3 py-3 pr-10 text-white outline-none transition hover:border-white/20 focus:border-ember/60 focus:shadow-[0_0_0_3px_rgba(216,177,93,0.08)] min-h-[50px] md:min-h-0 text-base md:text-sm sm:py-2.5"
-            name="saleId"
-            required
-            value={effectiveSelectedSaleId}
-            onChange={(event) => setSelectedSaleId(event.target.value)}
-          >
-            {sales.map((sale) => (
-              <option key={sale.id} value={sale.id}>
-                {formatSaleCode(sale)} - {sale.customer} - {brl(sale.total)}
-              </option>
-            ))}
-          </select>
-          <svg className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
-        </div>
+        <PremiumSelect
+          name="saleId"
+          value={effectiveSelectedSaleId}
+          onChange={(val) => setSelectedSaleId(val)}
+          searchable
+          placeholder="Buscar venda..."
+          options={sales.map((sale) => ({
+            value: sale.id,
+            label: `${formatSaleCode(sale)} - ${sale.customer} - ${brl(sale.total)}`,
+            render: (
+              <div className="flex items-center justify-between gap-3 w-full">
+                <span className="truncate flex-1">{formatSaleCode(sale)} — {sale.customer}</span>
+                <span className="text-ember font-medium shrink-0">{brl(sale.total)}</span>
+              </div>
+            )
+          }))}
+        />
       </label>
       <div className="rounded-crm border border-white/10 bg-white/[0.04] p-3">
         <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">Valor do pagamento</p>
@@ -2537,29 +2763,23 @@ function SaleCartFields({
               {hasColors ? (
                 <label className="block space-y-2 text-sm text-zinc-300">
                   <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">Cor</span>
-                  <div className="relative">
-                    <select className="w-full appearance-none rounded-crm border border-white/10 bg-black/70 px-3 py-3 pr-10 text-white outline-none transition hover:border-white/20 focus:border-ember/60 focus:shadow-[0_0_0_3px_rgba(216,177,93,0.08)] min-h-[50px] md:min-h-0 text-base md:text-sm sm:py-2.5" value={item.selectedColor} onChange={(event) => onChange(item.id, { selectedColor: event.target.value })}>
-                      <option value="">Selecione</option>
-                      {product?.colors.map((color) => <option key={color} value={color}>{color}</option>)}
-                    </select>
-                    <svg className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </div>
+                  <PremiumSelect
+                    value={item.selectedColor}
+                    onChange={(val) => onChange(item.id, { selectedColor: val })}
+                    options={product?.colors.map(c => ({ value: c, label: c })) || []}
+                    placeholder="Selecione a cor"
+                  />
                 </label>
               ) : null}
               {hasSizes ? (
                 <label className="block space-y-2 text-sm text-zinc-300">
                   <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">Tamanho</span>
-                  <div className="relative">
-                    <select className="w-full appearance-none rounded-crm border border-white/10 bg-black/70 px-3 py-3 pr-10 text-white outline-none transition hover:border-white/20 focus:border-ember/60 focus:shadow-[0_0_0_3px_rgba(216,177,93,0.08)] min-h-[50px] md:min-h-0 text-base md:text-sm sm:py-2.5" value={item.selectedSize} onChange={(event) => onChange(item.id, { selectedSize: event.target.value })}>
-                      <option value="">Selecione</option>
-                      {product?.sizes.map((size) => <option key={size} value={size}>{size}</option>)}
-                    </select>
-                    <svg className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </div>
+                  <PremiumSelect
+                    value={item.selectedSize}
+                    onChange={(val) => onChange(item.id, { selectedSize: val })}
+                    options={product?.sizes.map(s => ({ value: s, label: s })) || []}
+                    placeholder="Selecione o tamanho"
+                  />
                 </label>
               ) : null}
               <label className="block space-y-2 text-sm text-zinc-300">
@@ -2581,20 +2801,15 @@ function SaleCartFields({
       <div className="grid gap-3 rounded-crm border border-white/10 bg-white/[0.025] p-3 sm:grid-cols-[0.75fr_1fr]">
         <label className="block space-y-2 text-sm text-zinc-300">
           <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">Tipo de desconto</span>
-          <div className="relative">
-            <select
-              className="w-full appearance-none rounded-crm border border-white/10 bg-black/70 px-3 py-3 pr-10 text-white outline-none transition hover:border-white/20 focus:border-ember/60 focus:shadow-[0_0_0_3px_rgba(216,177,93,0.08)] min-h-[50px] md:min-h-0 text-base md:text-sm sm:py-2.5"
-              name="discountMode"
-              value={saleDiscountMode}
-              onChange={(event) => onDiscountModeChange(event.target.value as SaleDiscountMode)}
-            >
-              <option value="AMOUNT">Valor em R$</option>
-              <option value="PERCENTAGE">Porcentagem</option>
-            </select>
-            <svg className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
+          <PremiumSelect
+            name="discountMode"
+            value={saleDiscountMode}
+            onChange={(val) => onDiscountModeChange(val as SaleDiscountMode)}
+            options={[
+              { value: "AMOUNT", label: "Valor em R$" },
+              { value: "PERCENTAGE", label: "Porcentagem" }
+            ]}
+          />
         </label>
         {saleDiscountMode === "PERCENTAGE" ? (
           <label className="block space-y-2 text-sm text-zinc-300">
@@ -3137,7 +3352,7 @@ function Sales({
         <SalesMetric label="Ticket médio" value={brl(summary.averageTicketGeneral)} detail={`${summary.totalSalesInFilter} vendas`} />
       </section>
 
-      <GlassPanel title="Filtros de vendas">
+      <GlassPanel title="Filtros de vendas" className="relative z-50">
         <div className="grid gap-3 lg:grid-cols-[1.2fr_repeat(3,0.7fr)]">
           <label className="flex items-center gap-2 rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-zinc-500">
             <Search className="h-4 w-4" aria-hidden />
@@ -3149,65 +3364,66 @@ function Sales({
               onChange={(event) => updateFilter({ search: event.target.value })}
             />
           </label>
-          <div className="relative">
-            <select className="w-full appearance-none rounded-crm border border-white/10 bg-black/60 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm" value={filters.range} onChange={(event) => updateFilter({ ...rangeToDates(event.target.value as SalesFilters["range"]), range: event.target.value as SalesFilters["range"] })}>
-              <option value="today">Hoje</option>
-              <option value="yesterday">Ontem</option>
-              <option value="7d">Últimos 7 dias</option>
-              <option value="30d">Últimos 30 dias</option>
-              <option value="month">Este mês</option>
-              <option value="lastMonth">Mês passado</option>
-              <option value="custom">Personalizado</option>
-            </select>
-            <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-          <div className="relative">
-            <select className="w-full appearance-none rounded-crm border border-white/10 bg-black/60 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm" value={filters.status} onChange={(event) => updateFilter({ status: event.target.value })}>
-              <option value="">Status</option>
-              <option value="WAITING_PAYMENT">Aguardando pagamento</option>
-              <option value="CONFIRMED">Confirmada</option>
-              <option value="CANCELED">Cancelada</option>
-            </select>
-            <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-          <div className="relative">
-            <select className="w-full appearance-none rounded-crm border border-white/10 bg-black/60 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm" value={filters.channel} onChange={(event) => updateFilter({ channel: event.target.value })}>
-              <option value="">Canal</option>
-              <option value="WhatsApp">WhatsApp</option>
-              <option value="Instagram">Instagram</option>
-              <option value="Site">Site</option>
-              <option value="Loja Física">Loja Física</option>
-            </select>
-            <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
+          <PremiumSelect
+            value={filters.range}
+            onChange={(val) => updateFilter({ ...rangeToDates(val as SalesFilters["range"]), range: val as SalesFilters["range"] })}
+            options={[
+              { value: "today", label: "Hoje" },
+              { value: "yesterday", label: "Ontem" },
+              { value: "7d", label: "Últimos 7 dias" },
+              { value: "30d", label: "Últimos 30 dias" },
+              { value: "month", label: "Este mês" },
+              { value: "lastMonth", label: "Mês passado" },
+              { value: "custom", label: "Personalizado" }
+            ]}
+          />
+          <PremiumSelect
+            value={filters.status}
+            onChange={(val) => updateFilter({ status: val })}
+            placeholder="Status"
+            options={[
+              { value: "", label: "Todos os status" },
+              { value: "WAITING_PAYMENT", label: "Aguardando pagamento" },
+              { value: "CONFIRMED", label: "Confirmada" },
+              { value: "CANCELED", label: "Cancelada" }
+            ]}
+          />
+          <PremiumSelect
+            value={filters.channel}
+            onChange={(val) => updateFilter({ channel: val })}
+            placeholder="Canal"
+            options={[
+              { value: "", label: "Todos os canais" },
+              { value: "WhatsApp", label: "WhatsApp" },
+              { value: "Instagram", label: "Instagram" },
+              { value: "Site", label: "Site" },
+              { value: "Loja Física", label: "Loja Física" }
+            ]}
+          />
         </div>
         <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <FormInput label="Data inicial" name="salesStartDate" type="date" defaultValue={filters.startDate} onValueChange={(value) => updateFilter({ range: "custom", startDate: value })} />
           <FormInput label="Data final" name="salesEndDate" type="date" defaultValue={filters.endDate} onValueChange={(value) => updateFilter({ range: "custom", endDate: value })} />
-          <div className="relative">
-            <select className="w-full appearance-none rounded-crm border border-white/10 bg-black/60 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm" value={filters.customerId} onChange={(event) => updateFilter({ customerId: event.target.value })}>
-              <option value="">Cliente</option>
-              {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
-            </select>
-            <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-          <div className="relative">
-            <select className="w-full appearance-none rounded-crm border border-white/10 bg-black/60 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm" value={filters.productId} onChange={(event) => updateFilter({ productId: event.target.value })}>
-              <option value="">Produto</option>
-              {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
-            </select>
-            <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
+          <PremiumSelect
+            value={filters.customerId}
+            onChange={(val) => updateFilter({ customerId: val })}
+            placeholder="Cliente"
+            searchable
+            options={[
+              { value: "", label: "Todos os clientes" },
+              ...customers.map(c => ({ value: c.id, label: c.name }))
+            ]}
+          />
+          <PremiumSelect
+            value={filters.productId}
+            onChange={(val) => updateFilter({ productId: val })}
+            placeholder="Produto"
+            searchable
+            options={[
+              { value: "", label: "Todos os produtos" },
+              ...products.map(p => ({ value: p.id, label: p.name }))
+            ]}
+          />
         </div>
       </GlassPanel>
 
@@ -3594,7 +3810,7 @@ function Payments({
         <Metric label="Cancelado" value={String(canceledCount)} hint="não entra na receita" warning />
       </section>
 
-      <GlassPanel title="Pagamentos">
+      <GlassPanel title="Pagamentos" className="relative z-50">
         <div className="mb-4 grid gap-3 md:grid-cols-[1.2fr_0.7fr_0.7fr]">
           <label className="flex items-center gap-2 rounded-crm border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-zinc-500">
             <Search className="h-4 w-4" aria-hidden />
@@ -3606,30 +3822,30 @@ function Payments({
               onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
             />
           </label>
-          <div className="relative">
-            <select className="w-full appearance-none rounded-crm border border-white/10 bg-black/60 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm" value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}>
-              <option value="">Todos os status</option>
-              <option value="Pendente">Pendente</option>
-              <option value="Confirmado">Confirmado</option>
-              <option value="Estornado">Estornado</option>
-              <option value="Cancelado">Cancelado</option>
-            </select>
-            <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-          <div className="relative">
-            <select className="w-full appearance-none rounded-crm border border-white/10 bg-black/60 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm" value={filters.method} onChange={(event) => setFilters((current) => ({ ...current, method: event.target.value }))}>
-              <option value="">Todas as formas</option>
-              <option value="Pix">Pix</option>
-              <option value="Cartão">Cartão</option>
-              <option value="Boleto">Boleto</option>
-              <option value="Dinheiro">Dinheiro</option>
-            </select>
-            <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
+          <PremiumSelect
+            value={filters.status}
+            onChange={(val) => setFilters((current) => ({ ...current, status: val }))}
+            placeholder="Status"
+            options={[
+              { value: "", label: "Todos os status" },
+              { value: "Pendente", label: "Pendente" },
+              { value: "Confirmado", label: "Confirmado" },
+              { value: "Estornado", label: "Estornado" },
+              { value: "Cancelado", label: "Cancelado" }
+            ]}
+          />
+          <PremiumSelect
+            value={filters.method}
+            onChange={(val) => setFilters((current) => ({ ...current, method: val }))}
+            placeholder="Forma de pgto"
+            options={[
+              { value: "", label: "Todas as formas" },
+              { value: "Pix", label: "Pix" },
+              { value: "Cartão", label: "Cartão" },
+              { value: "Boleto", label: "Boleto" },
+              { value: "Dinheiro", label: "Dinheiro" }
+            ]}
+          />
         </div>
 
         {filteredPayments.length === 0 ? <EmptyState message="Nenhum pagamento encontrado." icon={CreditCard} /> : null}
@@ -3790,35 +4006,36 @@ function PostSales({ postSales, onResolve, onDelete, onCreate }: Readonly<{ post
 
       <GlassPanel
         title="Atendimentos"
+        className="relative z-50"
         actions={
           <div className="flex flex-wrap gap-2">
-            <div className="relative">
-              <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as PostSaleType | "ALL")} className="appearance-none rounded-crm border border-white/10 bg-black/50 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm">
-                <option value="ALL">Todos os tipos</option>
-                {Object.entries(postSaleTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-              <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </div>
-            <div className="relative">
-              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as PostSaleStatus | "ALL")} className="appearance-none rounded-crm border border-white/10 bg-black/50 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm">
-                <option value="ALL">Todos os status</option>
-                {Object.entries(postSaleStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-              <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </div>
-            <div className="relative">
-              <select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value as Priority | "ALL")} className="appearance-none rounded-crm border border-white/10 bg-black/50 px-3 py-2 pr-8 text-sm text-white outline-none transition hover:border-white/20 focus:border-ember/60 min-h-[48px] md:min-h-0 text-base md:text-sm">
-                <option value="ALL">Todas as prioridades</option>
-                {Object.entries(priorityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-              <svg className="pointer-events-none absolute right-2 top-1/2 h-5 w-5 md:h-3.5 md:w-3.5 -translate-y-1/2 text-zinc-400" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </div>
+            <PremiumSelect
+              value={typeFilter}
+              onChange={(val) => setTypeFilter(val as PostSaleType | "ALL")}
+              placeholder="Tipos"
+              options={[
+                { value: "ALL", label: "Todos os tipos" },
+                ...Object.entries(postSaleTypeLabels).map(([value, label]) => ({ value, label }))
+              ]}
+            />
+            <PremiumSelect
+              value={statusFilter}
+              onChange={(val) => setStatusFilter(val as PostSaleStatus | "ALL")}
+              placeholder="Status"
+              options={[
+                { value: "ALL", label: "Todos os status" },
+                ...Object.entries(postSaleStatusLabels).map(([value, label]) => ({ value, label }))
+              ]}
+            />
+            <PremiumSelect
+              value={priorityFilter}
+              onChange={(val) => setPriorityFilter(val as Priority | "ALL")}
+              placeholder="Prioridades"
+              options={[
+                { value: "ALL", label: "Todas as prioridades" },
+                ...Object.entries(priorityLabels).map(([value, label]) => ({ value, label }))
+              ]}
+            />
           </div>
         }
       >
@@ -3996,9 +4213,9 @@ function SettingsPanel({
   );
 }
 
-function GlassPanel({ title, badge, actions, children }: Readonly<{ title: string; badge?: string; actions?: React.ReactNode; children: React.ReactNode }>) {
+function GlassPanel({ title, badge, actions, children, className = "" }: Readonly<{ title: string; badge?: string; actions?: React.ReactNode; children: React.ReactNode; className?: string }>) {
   return (
-    <section className="glass-panel min-w-0 rounded-crm p-3 sm:p-4">
+    <section className={`glass-panel min-w-0 rounded-crm p-3 sm:p-4 ${className}`}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 sm:mb-4 sm:gap-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-white sm:text-base">
           {title}
